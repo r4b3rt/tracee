@@ -845,6 +845,8 @@ func (t *Tracee) initBPF(bpfObjectPath string) error {
 		}
 	}
 
+	//TODO: if kernel version supports ringbuffers, use them instead of perf
+
 	// Initialize perf buffers
 	t.eventsChannel = make(chan []byte, 1000)
 	t.lostEvChannel = make(chan uint64)
