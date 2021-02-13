@@ -660,12 +660,21 @@ func (rb *RingBuffer) Close() {
 }
 
 func (rb *RingBuffer) poll() error {
+
+	pollChannel := make(chan C.int)
+
+	go func() {
+		for {
+			err := C.ring_buffer__poll(rb.rb, -1)
+			pollChannel  <- err
+		}
+	}()
+
 	for {
 		select {
 		case <-rb.stop:
 			return nil
-		default:
-			err := C.ring_buffer__poll(rb.rb, -1)
+		case err := <-pollChannel:
 			if err < 0 {
 				if syscall.Errno(-err) == syscall.EINTR {
 					continue
