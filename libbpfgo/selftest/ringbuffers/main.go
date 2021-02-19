@@ -3,8 +3,8 @@ package main
 import "C"
 
 import (
-	"os"
 	bpf "github.com/aquasecurity/tracee/libbpfgo"
+	"os"
 )
 
 func main() {
@@ -35,14 +35,16 @@ func main() {
 	rb.Start()
 
 	numberOfEventsReceived := 0
-	
-	theloop:
+
+recvLoop:
 	for {
 		_ = <-eventsChannel
-		numberOfEventsReceived++ 
+		numberOfEventsReceived++
 		if numberOfEventsReceived > 5 {
-			break theloop	
+			break recvLoop
 		}
 	}
 
+	rb.Stop()
+	rb.Close()
 }

@@ -229,9 +229,11 @@ type PerfBuffer struct {
 }
 
 type RingBuffer struct {
-	rb     *C.struct_ring_buffer
-	bpfMap *BPFMap
-	stop   chan bool
+	rb      *C.struct_ring_buffer
+	bpfMap  *BPFMap
+	stop    chan bool
+	stopped bool
+	closed bool 
 }
 
 // BPF is using locked memory for BPF maps and various other things.
@@ -656,21 +658,31 @@ func (rb *RingBuffer) Stop() {
 }
 
 func (rb *RingBuffer) Close() {
+	if rb.closed {
+		return
+	}
+	for {
+		if rb.stopped {
+			break
+		}
+	}
 	C.ring_buffer__free(rb.rb)
+	rb.closed = true
 }
 
 func (rb *RingBuffer) poll() error {
 	for {
 		select {
 		case <-rb.stop:
+			rb.stopped = true
 			return nil
 		default:
-			err := C.ring_buffer__poll(rb.rb, 0)
+			err := C.ring_buffer__poll(rb.rb, 300)
 			if err < 0 {
 				if syscall.Errno(-err) == syscall.EINTR {
 					continue
 				}
-				return fmt.Errorf("Error polling perf buffer: %d", err)
+				return fmt.Errorf("error polling ring buffer: %d", err)
 			}
 		}
 	}
