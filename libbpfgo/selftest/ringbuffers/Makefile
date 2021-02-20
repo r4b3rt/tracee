@@ -6,21 +6,18 @@ BPF_SRC := $(shell find . -type f -name '*.bpf.c')
 PWD := $(shell pwd)
 
 LIBBPF_HEADERS := /usr/include/bpf
-LIBBPF_OBJ := $(PWD)/libbpf.a
+LIBBPF_OBJ := /usr/lib64/libbpf.a
 
 .PHONY: all
-all: $(TARGET) $(TARGET_BPF)
+all: vmlinux.h $(TARGET) $(TARGET_BPF)
 
-.PHONY: vmlinux.h
 vmlinux.h:
-	bin/bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 
 go_env := CC=gcc CGO_CFLAGS="-I $(LIBBPF_HEADERS)" CGO_LDFLAGS="$(LIBBPF_OBJ)"
-.PHONY: $(TARGET)
 $(TARGET): $(GO_SRC)
 	$(go_env) go build -ldflags '-extldflags "-static"' -o $(TARGET) 
 
-.PHONY: $(TARGET_BPF)
 $(TARGET_BPF): $(BPF_SRC)
 	clang \
 		-g -O2 -c -target bpf \
@@ -28,4 +25,4 @@ $(TARGET_BPF): $(BPF_SRC)
 
 .PHONY: clean
 clean:
-	rm self self.bpf.o
+	rm self self.bpf.o vmlinux.h
