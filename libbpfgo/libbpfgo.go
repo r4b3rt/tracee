@@ -671,19 +671,23 @@ func (rb *RingBuffer) Close() {
 }
 
 func (rb *RingBuffer) poll() error {
+
+	go func() {
+		<-rb.stop
+		rb.stopped = true
+	}()
+
 	for {
-		select {
-		case <-rb.stop:
-			rb.stopped = true
-			return nil
-		default:
-			err := C.ring_buffer__poll(rb.rb, 300)
-			if err < 0 {
-				if syscall.Errno(-err) == syscall.EINTR {
-					continue
-				}
-				return fmt.Errorf("error polling ring buffer: %d", err)
+		err := C.ring_buffer__poll(rb.rb, 300)
+		if err < 0 {
+			if syscall.Errno(-err) == syscall.EINTR {
+				continue
 			}
+			return fmt.Errorf("error polling ring buffer: %d", err)
+		}
+		
+		if rb.stopped {
+			break
 		}
 	}
 	return nil
