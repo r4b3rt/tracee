@@ -15,9 +15,11 @@ vmlinux.h:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 
 go_env := CC=gcc CGO_CFLAGS="-I $(LIBBPF_HEADERS)" CGO_LDFLAGS="$(LIBBPF_OBJ)"
+.PHONY: $(TARGET)
 $(TARGET): $(GO_SRC)
 	$(go_env) go build -ldflags '-extldflags "-static"' -o $(TARGET) 
 
+.PHONY: $(TARGET_BPF)
 $(TARGET_BPF): $(BPF_SRC)
 	clang \
 		-g -O2 -c -target bpf \
