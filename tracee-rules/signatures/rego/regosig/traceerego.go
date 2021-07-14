@@ -142,6 +142,7 @@ func (sig *RegoSignature) OnEvent(e types.Event) error {
 	if err != nil {
 		return err
 	}
+
 	if len(results) > 0 && len(results[0].Expressions) > 0 && results[0].Expressions[0].Value != nil {
 		switch v := results[0].Expressions[0].Value.(type) {
 		case bool:
@@ -167,6 +168,8 @@ func (sig *RegoSignature) OnEvent(e types.Event) error {
 func (sig *RegoSignature) OnSignal(signal types.Signal) error {
 	return fmt.Errorf("function OnSignal is not implemented")
 }
+
+func (sig *RegoSignature) Close() {}
 
 func (sig *RegoSignature) evalQuery(query string) (interface{}, error) {
 	pq, err := rego.New(

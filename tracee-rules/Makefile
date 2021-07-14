@@ -33,7 +33,7 @@ endif
 rules: $(OUT_RULES)
 
 ifndef DOCKER
-$(OUT_RULES): $(GOSIGNATURES_DIR) $(REGO_SIGNATURES_SRC) | $(OUT_DIR)
+$(OUT_RULES): $(GOSIGNATURES_SRC) $(REGO_SIGNATURES_SRC) | $(OUT_DIR)
 	mkdir -p $(OUT_RULES)
 	go build -buildmode=plugin -o $(OUT_GOSIGNATURES) $(GOSIGNATURES_SRC)
 	cp $(REGO_SIGNATURES_SRC) $(OUT_RULES)
@@ -53,7 +53,7 @@ $(tools): % : check_%
 ifndef DOCKER
 test: $(GO_SRC) $(tools)
 	go test -v ./...
-	opa test . --verbose --ignore="examples" --ignore="dist"
+	opa test . --verbose --ignore="examples" --ignore="dist" --ignore="benchmark"
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)

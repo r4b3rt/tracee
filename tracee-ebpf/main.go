@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aquasecurity/tracee/libbpfgo/helpers"
+	"github.com/aquasecurity/libbpfgo/helpers"
 	"github.com/aquasecurity/tracee/tracee-ebpf/tracee"
 	"github.com/syndtr/gocapability/capability"
 	cli "github.com/urfave/cli/v2"
@@ -28,6 +28,7 @@ var buildPolicy string
 //go:embed "dist/tracee.bpf/*"
 var bpfBundleInjected embed.FS
 var version string
+var bpf_core string
 
 func main() {
 	app := &cli.App{
@@ -155,19 +156,26 @@ func prepareOutput(outputSlice []string) (tracee.OutputConfig, error) {
 Control how and where output is printed.
 Possible options:
 
-[format:]{table,table-verbose,json,gob,gotemplate=/path/to/template}   output events in the specified format. for gotemplate, specify the mandatory template file
-out-file:/path/to/file                                                 write the output to a specified file. the path to the file will be created if not existing and the file will be deleted if existing (default: stdout)
-err-file:/path/to/file                                                 write the errors to a specified file. the path to the file will be created if not existing and the file will be deleted if existing (default: stderr)
-option:{stack-addresses,detect-syscall,exec-env}                       augment output according to given options (default: none)
-  stack-addresses                                                    include stack memory addresses for each event
-  detect-syscall                                                     when tracing kernel functions which are not syscalls, detect and show the original syscall that called that function
-  exec-env                                                           when tracing execve/execveat, show the environment variables that were used for execution
+[format:]table                                     output events in table format
+[format:]table-verbose                             output events in table format with extra fields per event
+[format:]json                                      output events in json format
+[format:]gob                                       output events in gob format
+[format:]gotemplate=/path/to/template              output events formatted using a given gotemplate file
+
+out-file:/path/to/file                             write the output to a specified file. create/trim the file if exists (default: stdout)
+err-file:/path/to/file                             write the errors to a specified file. create/trim the file if exists (default: stderr)
+
+option:{stack-addresses,detect-syscall,exec-env}   augment output according to given options (default: none)
+  stack-addresses                                  include stack memory addresses for each event
+  detect-syscall                                   when tracing kernel functions which are not syscalls, detect and show the original syscall that called that function
+  exec-env                                         when tracing execve/execveat, show the environment variables that were used for execution
+
 Examples:
   --output json                                            | output as json
   --output gotemplate=/path/to/my.tmpl                     | output as the provided go template
   --output out-file:/my/out err-file:/my/err               | output to /my/out and errors to /my/err
 
-Use this flag multiple times to choose multiple capture options	
+Use this flag multiple times to choose multiple output options
 `
 
 	res := tracee.OutputConfig{}
@@ -233,12 +241,14 @@ Possible options:
 [artifact:]all                     capture all of the above artifacts.
 
 dir:/path/to/dir        path where tracee will save produced artifacts. the artifact will be saved into an 'out' subdirectory. (default: /tmp/tracee).
+profile                 creates a runtime profile of program executions and their metadata for forensics use.
 clear-dir               clear the captured artifacts output dir before starting (default: false).
 
 Examples:
   --capture exec                                           | capture executed files into the default output directory
   --capture all --capture dir:/my/dir --capture clear-dir  | delete /my/dir/out and then capture all supported artifacts into it
   --capture write=/usr/bin/* --capture write=/etc/*        | capture files that were written into anywhere under /usr/bin/ or /etc/
+  --capture exec --capture profile                         | captures executed files and create a runtime profile in the output directory
 
 Use this flag multiple times to choose multiple capture options
 `
@@ -285,6 +295,9 @@ Use this flag multiple times to choose multiple capture options
 			if len(outDir) == 0 {
 				return tracee.CaptureConfig{}, fmt.Errorf("capture output dir cannot be empty")
 			}
+		} else if cap == "profile" {
+			capture.Exec = true
+			capture.Profile = true
 		} else {
 			return tracee.CaptureConfig{}, fmt.Errorf("invalid capture option specified, use '--capture help' for more info")
 		}
@@ -556,7 +569,7 @@ To 'escape' those operators, please use single quotes, e.g.: 'uid>0'
 			continue
 		}
 
-		return tracee.Filter{}, fmt.Errorf("invalid filter option specified, use '--filter help' for more info")
+		return tracee.Filter{}, fmt.Errorf("invalid filter option specified, use '--trace help' for more info")
 	}
 
 	var err error
@@ -900,7 +913,11 @@ func missingKernelConfigOptions() []string {
 	}
 
 	kConfig := helpers.KernelConfig{}
-	kConfig.InitKernelConfig()
+	err := kConfig.InitKernelConfig()
+	if err != nil {
+		// we were not able to get kernel config - ignore the check and try to continue
+		return []string{}
+	}
 
 	missing := []string{}
 
@@ -1019,7 +1036,12 @@ func getBPFObject() (string, error) {
 		}
 		return bpfPath, nil
 	}
+
 	bpfObjFileName := fmt.Sprintf("tracee.bpf.%s.%s.o", strings.ReplaceAll(tracee.UnameRelease(), ".", "_"), strings.ReplaceAll(version, ".", "_"))
+	if bpf_core != "" {
+		bpfObjFileName = fmt.Sprintf("tracee.bpf.core.%s.o", strings.ReplaceAll(version, ".", "_"))
+	}
+
 	exePath, err := os.Executable()
 	if err != nil {
 		return "", err

@@ -1,16 +1,24 @@
+
 // +build ignore
 // ^^ this is a golang build tag meant to exclude this C file from compilation by the CGO compiler
 
+/* 
+Note: This file is licenced differently from the rest of the project
+SPDX-License-Identifier: GPL-2.0
+Copyright (C) Aqua Security inc.
+*/
+
+#ifndef CORE
 /* In Linux 5.4 asm_inline was introduced, but it's not supported by clang.
  * Redefine it to just asm to enable successful compilation.
  * see https://github.com/iovisor/bcc/commit/2d1497cde1cc9835f759a707b42dea83bee378b8 for more details
+ * Note: types.h should be included before defining asm_inline or compilation might break
  */
 #include <linux/types.h>
 #ifdef asm_inline
 #undef asm_inline
 #define asm_inline asm
 #endif
-
 #include <uapi/linux/ptrace.h>
 #include <uapi/linux/in.h>
 #include <uapi/linux/in6.h>
@@ -33,15 +41,28 @@
 #include <linux/security.h>
 #include <linux/socket.h>
 #include <linux/version.h>
+#define KBUILD_MODNAME "tracee"
+#include <net/sock.h>
+#include <net/inet_sock.h>
+#include <net/ipv6.h>
+#include <linux/ipv6.h>
 
 #include <uapi/linux/bpf.h>
+#include <linux/bpf.h>
 #include <linux/kconfig.h>
 #include <linux/version.h>
 
+#else
+//CO:RE is enabled
+#include <vmlinux.h>
+#include "co_re_missing_definitions.h"
+#endif
+
 #undef container_of
-//#include "bpf_core_read.h"
+#include <bpf_core_read.h>
 #include <bpf_helpers.h>
 #include <bpf_tracing.h>
+#include <bpf_endian.h>
 
 #if defined(bpf_target_x86)
 #define PT_REGS_PARM6(ctx)  ((ctx)->r9)
@@ -49,11 +70,14 @@
 #define PT_REGS_PARM6(x) (((PT_REGS_ARM64 *)(x))->regs[5])
 #endif
 
+
+#ifdef CORE
+extern bool CONFIG_ARCH_HAS_SYSCALL_WRAPPER __kconfig;
+#endif
+
 #define MAX_PERCPU_BUFSIZE  (1 << 15)     // This value is actually set by the kernel as an upper bound
 #define MAX_STRING_SIZE     4096          // Choosing this value to be the same as PATH_MAX
 #define MAX_BYTES_ARR_SIZE  4096          // Max size of bytes array, arbitrarily chosen
-#define MAX_STR_ARR_ELEM    40            // String array elements number should be bounded due to instructions limit
-#define MAX_PATH_PREF_SIZE  64            // Max path prefix should be bounded due to instructions limit
 #define MAX_STACK_ADDRESSES 1024          // Max amount of different stack trace addresses to buffer in the Map
 #define MAX_STACK_DEPTH     20            // Max depth of each stack trace to track
 #define MAX_STR_FILTER_SIZE 16            // Max string filter size should be bounded to the size of the compared values (comm, uts)
@@ -94,6 +118,8 @@
 #define SOCKADDR_T    12UL
 #define ALERT_T       13UL
 #define BYTES_T       14UL
+#define U16_T         15UL
+#define CRED_T        16UL
 #define TYPE_MAX      255UL
 
 #define TAG_NONE           0UL
@@ -103,44 +129,59 @@
 #define SYS_MMAP              9
 #define SYS_MPROTECT          10
 #define SYS_RT_SIGRETURN      15
-#define SYS_CLONE             56
-#define SYS_FORK              57
-#define SYS_VFORK             58
 #define SYS_EXECVE            59
 #define SYS_EXIT              60
 #define SYS_EXIT_GROUP        231
 #define SYS_OPENAT            257
 #define SYS_EXECVEAT          322
+#define SYSCALL_CONNECT       42
+#define SYSCALL_ACCEPT        43
+#define SYSCALL_ACCEPT4       288
+#define SYSCALL_LISTEN        50
+#define SYSCALL_BIND          49
 #elif defined(bpf_target_arm64)
 #define SYS_OPEN              1000 // undefined in arm64
 #define SYS_MMAP              222
 #define SYS_MPROTECT          226
 #define SYS_RT_SIGRETURN      139
-#define SYS_CLONE             220
-#define SYS_FORK              1000 // undefined in arm64
-#define SYS_VFORK             1000 // undefined in arm64
 #define SYS_EXECVE            221
 #define SYS_EXIT              93
 #define SYS_EXIT_GROUP        94
 #define SYS_OPENAT            56
 #define SYS_EXECVEAT          281
+#define SYSCALL_CONNECT       203
+#define SYSCALL_ACCEPT        202
+#define SYSCALL_ACCEPT4       242
+#define SYSCALL_LISTEN        201
+#define SYSCALL_BIND          200
 #endif
 
-#define RAW_SYS_ENTER         1000
-#define RAW_SYS_EXIT          1001
-#define DO_EXIT               1002
-#define CAP_CAPABLE           1003
-#define SECURITY_BPRM_CHECK   1004
-#define SECURITY_FILE_OPEN    1005
-#define SECURITY_INODE_UNLINK 1006
-#define VFS_WRITE             1007
-#define VFS_WRITEV            1008
-#define MEM_PROT_ALERT        1009
-#define SCHED_PROCESS_EXIT    1010
-#define COMMIT_CREDS          1011
-#define SWITCH_TASK_NS        1012
-#define MAGIC_WRITE           1013
-#define MAX_EVENT_ID          1014
+#define RAW_SYS_ENTER           1000
+#define RAW_SYS_EXIT            1001
+#define SCHED_PROCESS_FORK      1002
+#define SCHED_PROCESS_EXEC      1003
+#define SCHED_PROCESS_EXIT      1004
+#define DO_EXIT                 1005
+#define CAP_CAPABLE             1006
+#define VFS_WRITE               1007
+#define VFS_WRITEV              1008
+#define MEM_PROT_ALERT          1009
+#define COMMIT_CREDS            1010
+#define SWITCH_TASK_NS          1011
+#define MAGIC_WRITE             1012
+#define CGROUP_ATTACH_TASK      1013
+#define SECURITY_BPRM_CHECK     1014
+#define SECURITY_FILE_OPEN      1015
+#define SECURITY_INODE_UNLINK   1016
+#define SECURITY_SOCKET_CREATE  1017
+#define SECURITY_SOCKET_LISTEN  1018
+#define SECURITY_SOCKET_CONNECT 1019
+#define SECURITY_SOCKET_ACCEPT  1020
+#define SECURITY_SOCKET_BIND    1021
+#define SECURITY_SB_MOUNT       1022
+#define SECURITY_BPF            1023
+#define SECURITY_BPF_MAP        1024
+#define MAX_EVENT_ID            1025
 
 #define CONFIG_SHOW_SYSCALL         1
 #define CONFIG_EXEC_ENV             2
@@ -177,11 +218,47 @@
 
 #define DEV_NULL_STR    0
 
+#define CONT_ID_LEN 12
+
+#ifndef CORE
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
+// Use lower values on older kernels, where the instruction limit is 4096
+#define MAX_STR_ARR_ELEM    40
+#define MAX_PATH_PREF_SIZE  64
+#define MAX_PATH_COMPONENTS 25
+#define MAX_BIN_CHUNKS      110
+#else
+// Otherwise, the sky is the limit (complexity limit of 1 million verified instructions)
+#define MAX_STR_ARR_ELEM    128
+#define MAX_PATH_PREF_SIZE  128
+#define MAX_PATH_COMPONENTS 128
+#define MAX_BIN_CHUNKS      256
+#endif
+#else
+// XXX: In the future, these values will be global volatile constants that 
+//      can be set at runtime from userspace go code. This way we can dynamically
+//      set them based on kernel version. libbpfgo needs this feature first.
+//      For now setting the lower limit is the safest option.
+#define MAX_STR_ARR_ELEM    40
+#define MAX_PATH_PREF_SIZE  64
+#define MAX_PATH_COMPONENTS 25
+#define MAX_BIN_CHUNKS      110
+#endif
+
+#ifndef CORE
 #define READ_KERN(ptr) ({ typeof(ptr) _val;                             \
                           __builtin_memset(&_val, 0, sizeof(_val));     \
                           bpf_probe_read(&_val, sizeof(_val), &ptr);    \
                           _val;                                         \
                         })
+#else
+// Try using READ_KERN here, just don't embed them in each other
+#define READ_KERN(ptr) ({ typeof(ptr) _val;                             \
+                          __builtin_memset(&_val, 0, sizeof(_val));     \
+                          bpf_core_read(&_val, sizeof(_val), &ptr);    \
+                          _val;                                         \
+                        })
+#endif
 
 #define BPF_MAP(_name, _type, _key_type, _value_type, _max_entries) \
 struct bpf_map_def SEC("maps") _name = { \
@@ -229,7 +306,7 @@ struct bpf_map_def SEC("maps") _name = { \
 
 /*=============================== INTERNAL STRUCTS ===========================*/
 
-typedef struct context {
+typedef struct event_context {
     u64 ts;                     // Timestamp
     u32 pid;                    // PID as in the userspace term
     u32 tid;                    // TID as in the userspace term
@@ -242,6 +319,7 @@ typedef struct context {
     u32 pid_id;
     char comm[TASK_COMM_LEN];
     char uts_name[TASK_COMM_LEN];
+    char cont_id[16];           // Container ID, padding to 16 to keep the context struct aligned
     u32 eventid;
     s64 retval;
     u32 stack_id;
@@ -249,7 +327,7 @@ typedef struct context {
 } context_t;
 
 typedef struct args {
-    unsigned long args[6];
+    unsigned long args[7]; // the last element of this array is used to save the function entry timestamp
 } args_t;
 
 typedef struct bin_args {
@@ -275,14 +353,50 @@ typedef struct string_filter {
     char str[MAX_STR_FILTER_SIZE];
 } string_filter_t;
 
+typedef struct container_id {
+    char id[CONT_ID_LEN+1];
+} container_id_t;
+
 typedef struct alert {
     u64 ts;     // Timestamp
     u32 msg;    // Encoded message
     u8 payload; // Non zero if payload is sent to userspace
 } alert_t;
 
+typedef struct network_connection_v4 {
+    u32 local_address;
+    u16 local_port;
+    u32 remote_address;
+    u16 remote_port;
+} net_conn_v4_t;
+
+typedef struct network_connection_v6 {
+    struct in6_addr local_address;
+    u16 local_port;
+    struct in6_addr remote_address;
+    u16 remote_port;
+} net_conn_v6_t;
+
+// For a good summary about capabilities, see https://lwn.net/Articles/636533/
+typedef struct slim_cred {
+    uid_t  uid;             /* real UID of the task */
+    gid_t  gid;             /* real GID of the task */
+    uid_t  suid;            /* saved UID of the task */
+    gid_t  sgid;            /* saved GID of the task */
+    uid_t  euid;            /* effective UID of the task */
+    gid_t  egid;            /* effective GID of the task */
+    uid_t  fsuid;           /* UID for VFS ops */
+    gid_t  fsgid;           /* GID for VFS ops */
+    u64    cap_inheritable; /* caps our children can inherit */
+    u64    cap_permitted;   /* caps we're permitted */
+    u64    cap_effective;   /* caps we can actually use */
+    u64    cap_bset;        /* capability bounding set */
+    u64    cap_ambient;     /* Ambient capability set */
+} slim_cred_t;
+
 /*================================ KERNEL STRUCTS =============================*/
 
+#ifndef CORE
 struct mnt_namespace {
     atomic_t        count;
     struct ns_common    ns;
@@ -296,7 +410,7 @@ struct mount {
     struct vfsmount mnt;
     // ...
 };
-
+#endif
 /*=================================== MAPS =====================================*/
 
 BPF_HASH(config_map, u32, u32);                         // Various configurations
@@ -304,6 +418,7 @@ BPF_HASH(chosen_events_map, u32, u32);                  // Events chosen by the 
 BPF_HASH(traced_pids_map, u32, u32);                    // Keep track of traced pids
 BPF_HASH(new_pids_map, u32, u32);                       // Keep track of the processes of newly executed binaries
 BPF_HASH(new_pidns_map, u32, u32);                      // Keep track of new pid namespaces
+BPF_HASH(pid_to_cont_id_map, u32, container_id_t);      // Map pid to container id
 BPF_HASH(args_map, u64, args_t);                        // Persist args info between function entry and return
 BPF_HASH(ret_map, u64, u64);                            // Persist return value to be used in tail calls
 BPF_HASH(inequality_filter, u32, u64);                  // Used to filter events by some uint field either by < or >
@@ -317,6 +432,7 @@ BPF_HASH(bin_args_map, u64, bin_args_t);                // Persist args for send
 BPF_HASH(sys_32_to_64_map, u32, u32);                   // Map 32bit syscalls numbers to 64bit syscalls numbers
 BPF_HASH(params_types_map, u32, u64);                   // Encoded parameters types for event
 BPF_HASH(params_names_map, u32, u64);                   // Encoded parameters names for event
+BPF_HASH(sockfd_map, u32, u32);                         // Persist sockfd from syscalls to be used in the corresponding lsm hooks
 BPF_ARRAY(file_filter, path_filter_t, 3);               // Used to filter vfs_write events
 BPF_ARRAY(string_store, path_filter_t, 1);              // Store strings from userspace
 BPF_PERCPU_ARRAY(bufs, buf_t, MAX_BUFFERS);             // Percpu global buffer variables
@@ -335,32 +451,38 @@ BPF_PERF_OUTPUT(file_writes);                       // File writes events submis
 
 static __always_inline u32 get_mnt_ns_id(struct nsproxy *ns)
 {
-    return READ_KERN(READ_KERN(ns->mnt_ns)->ns.inum);
+    struct mnt_namespace* mntns = READ_KERN(ns->mnt_ns);
+    return READ_KERN(mntns->ns.inum);
 }
 
 static __always_inline u32 get_pid_ns_id(struct nsproxy *ns)
 {
-    return READ_KERN(READ_KERN(ns->pid_ns_for_children)->ns.inum);
+    struct pid_namespace* pidns = READ_KERN(ns->pid_ns_for_children);
+    return READ_KERN(pidns->ns.inum);
 }
 
 static __always_inline u32 get_uts_ns_id(struct nsproxy *ns)
 {
-    return READ_KERN(READ_KERN(ns->uts_ns)->ns.inum);
+    struct uts_namespace* uts_ns = READ_KERN(ns->uts_ns);
+    return READ_KERN(uts_ns->ns.inum);
 }
 
 static __always_inline u32 get_ipc_ns_id(struct nsproxy *ns)
 {
-    return READ_KERN(READ_KERN(ns->ipc_ns)->ns.inum);
+    struct ipc_namespace* ipc_ns = READ_KERN(ns->ipc_ns);
+    return READ_KERN(ipc_ns->ns.inum);
 }
 
 static __always_inline u32 get_net_ns_id(struct nsproxy *ns)
 {
-    return READ_KERN(READ_KERN(ns->net_ns)->ns.inum);
+    struct net* net_ns = READ_KERN(ns->net_ns);
+    return READ_KERN(net_ns ->ns.inum);
 }
 
 static __always_inline u32 get_cgroup_ns_id(struct nsproxy *ns)
 {
-    return READ_KERN(READ_KERN(ns->cgroup_ns)->ns.inum);
+    struct cgroup_namespace* cgroup_ns = READ_KERN(ns->cgroup_ns);
+    return READ_KERN(cgroup_ns->ns.inum);
 }
 
 static __always_inline u32 get_task_mnt_ns_id(struct task_struct *task)
@@ -395,53 +517,91 @@ static __always_inline u32 get_task_cgroup_ns_id(struct task_struct *task)
 
 static __always_inline u32 get_task_ns_pid(struct task_struct *task)
 {
-    unsigned int level = READ_KERN(READ_KERN(READ_KERN(task->nsproxy)->pid_ns_for_children)->level);
+    struct nsproxy *namespaceproxy = READ_KERN(task->nsproxy);
+    struct pid_namespace *pid_ns_children = READ_KERN(namespaceproxy->pid_ns_for_children);
+    unsigned int level = READ_KERN(pid_ns_children->level);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && !defined(RHEL_RELEASE_GT_8_0))
     // kernel 4.14-4.18:
     return READ_KERN(READ_KERN(task->pids[PIDTYPE_PID].pid)->numbers[level].nr);
 #else
-    // kernel 4.19 onwards:
-    return READ_KERN(READ_KERN(task->thread_pid)->numbers[level].nr);
+    // kernel 4.19 onwards, and CO:RE:
+    struct pid *tpid = READ_KERN(task->thread_pid);
+    return READ_KERN(tpid->numbers[level].nr);
 #endif
 }
 
 static __always_inline u32 get_task_ns_tgid(struct task_struct *task)
-{
-    unsigned int level = READ_KERN(READ_KERN(READ_KERN(task->nsproxy)->pid_ns_for_children)->level);
+{    
+    struct nsproxy *namespaceproxy = READ_KERN(task->nsproxy);
+    struct pid_namespace *pid_ns_children = READ_KERN(namespaceproxy->pid_ns_for_children);
+    unsigned int level = READ_KERN(pid_ns_children->level);
     struct task_struct *group_leader = READ_KERN(task->group_leader);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && !defined(RHEL_RELEASE_GT_8_0))
     // kernel 4.14-4.18:
     return READ_KERN(READ_KERN(group_leader->pids[PIDTYPE_PID].pid)->numbers[level].nr);
 #else
-    // kernel 4.19 onwards:
-    return READ_KERN(READ_KERN(group_leader->thread_pid)->numbers[level].nr);
+    // kernel 4.19 onwards, and CO:RE:
+    struct pid *tpid = READ_KERN(group_leader->thread_pid);
+    return READ_KERN(tpid->numbers[level].nr);
 #endif
 }
 
 static __always_inline u32 get_task_ns_ppid(struct task_struct *task)
 {
     struct task_struct *real_parent = READ_KERN(task->real_parent);
-    unsigned int level = READ_KERN(READ_KERN(READ_KERN(real_parent->nsproxy)->pid_ns_for_children)->level);
+    struct nsproxy *namespaceproxy = READ_KERN(real_parent->nsproxy);
+    struct pid_namespace *pid_ns_children = READ_KERN(namespaceproxy->pid_ns_for_children);
+    unsigned int level = READ_KERN(pid_ns_children->level);
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && !defined(RHEL_RELEASE_GT_8_0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && !defined(RHEL_RELEASE_GT_8_0)) && !defined(CORE)
     // kernel 4.14-4.18:
     return READ_KERN(READ_KERN(real_parent->pids[PIDTYPE_PID].pid)->numbers[level].nr);
 #else
-    // kernel 4.19 onwards:
-    return READ_KERN(READ_KERN(real_parent->thread_pid)->numbers[level].nr);
+    // kernel 4.19 onwards, and CO:RE:
+    struct pid *tpid = READ_KERN(real_parent->thread_pid);
+    return READ_KERN(tpid->numbers[level].nr);
 #endif
 }
 
 static __always_inline char * get_task_uts_name(struct task_struct *task)
 {
-    return READ_KERN(READ_KERN(READ_KERN(task->nsproxy)->uts_ns)->name.nodename);
+    struct nsproxy *np = READ_KERN(task->nsproxy);
+    struct uts_namespace *uts_ns = READ_KERN(np->uts_ns);
+    return READ_KERN(uts_ns->name.nodename);
 }
 
 static __always_inline u32 get_task_ppid(struct task_struct *task)
 {
-    return READ_KERN(READ_KERN(task->real_parent)->pid);
+    struct task_struct *parent = READ_KERN(task->real_parent);
+    return READ_KERN(parent->pid);
+}
+
+static __always_inline u32 get_task_host_pid(struct task_struct *task)
+{
+    return READ_KERN(task->pid);
+}
+
+static __always_inline char * get_task_parent_comm(struct task_struct *task)
+{
+    struct task_struct *parent = READ_KERN(task->real_parent);
+    return READ_KERN(parent->comm);
+}
+
+static __always_inline const char * get_binprm_filename(struct linux_binprm *bprm)
+{
+    return READ_KERN(bprm->filename);
+}
+
+static __always_inline const char * get_cgroup_dirname(struct cgroup *cgrp)
+{
+    struct kernfs_node *kn = READ_KERN(cgrp->kn);
+
+    if (kn == NULL)
+        return NULL;
+
+    return READ_KERN(kn->name);
 }
 
 static __always_inline bool is_x86_compat(struct task_struct *task)
@@ -525,17 +685,21 @@ static __always_inline struct file* get_file_ptr_from_bprm(struct linux_binprm *
 
 static __always_inline dev_t get_dev_from_file(struct file *file)
 {
-    return READ_KERN(READ_KERN(READ_KERN(file->f_inode)->i_sb)->s_dev);
+    struct inode *f_inode = READ_KERN(file->f_inode);
+    struct super_block *i_sb = READ_KERN(f_inode->i_sb);
+    return READ_KERN(i_sb->s_dev);
 }
 
 static __always_inline unsigned long get_inode_nr_from_file(struct file *file)
 {
-    return READ_KERN(READ_KERN(file->f_inode)->i_ino);
+    struct inode *f_inode = READ_KERN(file->f_inode);
+    return READ_KERN(f_inode->i_ino);
 }
 
 static __always_inline unsigned short get_inode_mode_from_file(struct file *file)
 {
-    return READ_KERN(READ_KERN(file->f_inode)->i_mode);
+    struct inode *f_inode = READ_KERN(file->f_inode);
+    return READ_KERN(f_inode->i_mode);
 }
 
 static __always_inline struct path get_path_from_file(struct file *file)
@@ -551,6 +715,75 @@ static __always_inline unsigned long get_vma_flags(struct vm_area_struct *vma)
 static inline struct mount *real_mount(struct vfsmount *mnt)
 {
     return container_of(mnt, struct mount, mnt);
+}
+
+static __always_inline u32 get_inet_rcv_saddr(struct inet_sock *inet)
+{
+    return READ_KERN(inet->inet_rcv_saddr);
+}
+
+static __always_inline u32 get_inet_saddr(struct inet_sock *inet)
+{
+    return READ_KERN(inet->inet_saddr);
+}
+
+static __always_inline u32 get_inet_daddr(struct inet_sock *inet)
+{
+    return READ_KERN(inet->inet_daddr);
+}
+
+static __always_inline u16 get_inet_sport(struct inet_sock *inet)
+{
+    return READ_KERN(inet->inet_sport);
+}
+
+static __always_inline u16 get_inet_dport(struct inet_sock *inet)
+{
+    return READ_KERN(inet->inet_dport);
+}
+
+static __always_inline struct sock* get_socket_sock(struct socket *socket)
+{
+    return READ_KERN(socket->sk);
+}
+
+static __always_inline u16 get_sock_family(struct sock *sock)
+{
+    return READ_KERN(sock->sk_family);
+}
+
+static __always_inline u16 get_sockaddr_family(struct sockaddr *address)
+{
+    return READ_KERN(address->sa_family);
+}
+
+static __always_inline struct in6_addr get_sock_v6_rcv_saddr(struct sock *sock)
+{
+    return READ_KERN(sock->sk_v6_rcv_saddr);
+}
+
+static __always_inline struct in6_addr get_ipv6_pinfo_saddr(struct ipv6_pinfo *np)
+{
+    return READ_KERN(np->saddr);
+}
+
+static __always_inline struct in6_addr get_sock_v6_daddr(struct sock *sock)
+{
+    return READ_KERN(sock->sk_v6_daddr);
+}
+
+static __always_inline volatile unsigned char get_sock_state(struct sock *sock)
+{
+    // return READ_KERN(sock->sk_state);
+
+    volatile unsigned char sk_state_own_impl;
+    bpf_probe_read((void *)&sk_state_own_impl, sizeof(sk_state_own_impl), (const void *)&sock->sk_state);
+    return sk_state_own_impl;
+}
+
+static __always_inline struct ipv6_pinfo* get_inet_pinet6(struct inet_sock *inet)
+{
+    return READ_KERN(inet->pinet6);
 }
 
 /*============================== HELPER FUNCTIONS ==============================*/
@@ -590,7 +823,10 @@ static __always_inline int init_context(context_t *context)
     char * uts_name = get_task_uts_name(task);
     if (uts_name)
         bpf_probe_read_str(&context->uts_name, TASK_COMM_LEN, uts_name);
-
+    container_id_t *container_id = bpf_map_lookup_elem(&pid_to_cont_id_map, &context->host_tid);
+    if (container_id != NULL) {
+        __builtin_memcpy(context->cont_id, container_id->id, CONT_ID_LEN);
+    }
     // Save timestamp in microsecond resolution
     context->ts = bpf_ktime_get_ns()/1000;
 
@@ -1036,45 +1272,54 @@ out:
     return 1;
 }
 
-static __always_inline int save_file_path_to_str_buf(buf_t *string_p, struct file* file)
+static __always_inline int save_path_to_str_buf(buf_t *string_p, const struct path *path)
 {
-    struct path f_path = get_path_from_file(file);
+    struct path f_path;
+    bpf_probe_read(&f_path, sizeof(struct path), path);
     char slash = '/';
     int zero = 0;
     struct dentry *dentry = f_path.dentry;
     struct vfsmount *vfsmnt = f_path.mnt;
+    struct mount *mnt_parent_p;
+
     struct mount *mnt_p = real_mount(vfsmnt);
-    struct mount mnt;
-    bpf_probe_read(&mnt, sizeof(struct mount), mnt_p);
+    bpf_probe_read(&mnt_parent_p, sizeof(struct mount*), &mnt_p->mnt_parent);
 
     u32 buf_off = (MAX_PERCPU_BUFSIZE >> 1);
+    struct dentry *mnt_root;
+    struct dentry *d_parent;
+    struct qstr d_name;
+    unsigned int len;
+    unsigned int off;
+    int sz;
 
     #pragma unroll
-    // As bpf loops are not allowed and max instructions number is 4096, path components is limited to 30
-    for (int i = 0; i < 30; i++) {
-        struct dentry *mnt_root = get_mnt_root_ptr_from_vfsmnt(vfsmnt);
-        struct dentry *d_parent = get_d_parent_ptr_from_dentry(dentry);
+    for (int i = 0; i < MAX_PATH_COMPONENTS; i++) {
+        mnt_root = get_mnt_root_ptr_from_vfsmnt(vfsmnt);
+        d_parent = get_d_parent_ptr_from_dentry(dentry);
         if (dentry == mnt_root || dentry == d_parent) {
             if (dentry != mnt_root) {
                 // We reached root, but not mount root - escaped?
                 break;
             }
-            if (mnt_p != mnt.mnt_parent) {
+            if (mnt_p != mnt_parent_p) {
                 // We reached root, but not global root - continue with mount point path
-                dentry = mnt.mnt_mountpoint;
-                bpf_probe_read(&mnt, sizeof(struct mount), mnt.mnt_parent);
-                vfsmnt = &mnt.mnt;
+                bpf_probe_read(&dentry, sizeof(struct dentry*), &mnt_p->mnt_mountpoint);
+                bpf_probe_read(&mnt_p, sizeof(struct mount*), &mnt_p->mnt_parent);
+                bpf_probe_read(&mnt_parent_p, sizeof(struct mount*), &mnt_p->mnt_parent);
+                vfsmnt = &mnt_p->mnt;
                 continue;
             }
             // Global root - path fully parsed
             break;
         }
         // Add this dentry name to path
-        struct qstr d_name = get_d_name_from_dentry(dentry);
-        unsigned int len = (d_name.len+1) & (MAX_STRING_SIZE-1);
-        unsigned int off = buf_off - len;
+        d_name = get_d_name_from_dentry(dentry);
+        len = (d_name.len+1) & (MAX_STRING_SIZE-1);
+        off = buf_off - len;
+
         // Is string buffer big enough for dentry name?
-        int sz = 0;
+        sz = 0;
         if (off <= buf_off) { // verify no wrap occured
             len = len & ((MAX_PERCPU_BUFSIZE >> 1)-1);
             sz = bpf_probe_read_str(&(string_p->buf[off & ((MAX_PERCPU_BUFSIZE >> 1)-1)]), len, (void *)d_name.name);
@@ -1095,7 +1340,7 @@ static __always_inline int save_file_path_to_str_buf(buf_t *string_p, struct fil
     if (buf_off == (MAX_PERCPU_BUFSIZE >> 1)) {
         // memfd files have no path in the filesystem -> extract their name
         buf_off = 0;
-        struct qstr d_name = get_d_name_from_dentry(dentry);
+        d_name = get_d_name_from_dentry(dentry);
         bpf_probe_read_str(&(string_p->buf[0]), MAX_STRING_SIZE, (void *)d_name.name);
     } else {
         // Add leading slash
@@ -1117,8 +1362,7 @@ static __always_inline int save_dentry_path_to_str_buf(buf_t *string_p, struct d
     u32 buf_off = (MAX_PERCPU_BUFSIZE >> 1);
 
     #pragma unroll
-    // As bpf loops are not allowed and max instructions number is 4096, path components is limited to 30
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < MAX_PATH_COMPONENTS; i++) {
         struct dentry *d_parent = get_d_parent_ptr_from_dentry(dentry);
         if (dentry == d_parent) {
             break;
@@ -1233,6 +1477,7 @@ static __always_inline int load_args(args_t *args, bool delete, u32 event_id)
     args->args[3] = saved_args->args[3];
     args->args[4] = saved_args->args[4];
     args->args[5] = saved_args->args[5];
+    args->args[6] = saved_args->args[6];
 
     if (delete)
         bpf_map_delete_elem(&args_map, &id);
@@ -1287,6 +1532,40 @@ static __always_inline int del_retval(u32 event_id)
     id = id << 32 | tid;
 
     bpf_map_delete_elem(&ret_map, &id);
+
+    return 0;
+}
+
+static __always_inline int save_sockfd(u32 sockfd)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+
+    bpf_map_update_elem(&sockfd_map, &pid, &sockfd, BPF_ANY);
+
+    return 0;
+}
+
+static __always_inline int load_sockfd(u32 *sockfd)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+
+    u32 *saved_sockfd = bpf_map_lookup_elem(&sockfd_map, &pid);
+    if (saved_sockfd == 0) {
+        // missed entry or not traced
+        return -1;
+    }
+
+    *sockfd = *saved_sockfd;
+    bpf_map_delete_elem(&sockfd_map, &pid);
+
+    return 0;
+}
+
+static __always_inline int del_sockfd()
+{
+    u32 pid = bpf_get_current_pid_tgid();
+
+    bpf_map_delete_elem(&sockfd_map, &pid);
 
     return 0;
 }
@@ -1390,7 +1669,10 @@ static __always_inline int trace_ret_generic(void *ctx, u32 id, u64 types, u64 t
     set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
 
     u8 argnum = save_args_to_submit_buf(types, tags, args);
-    init_and_save_context(ctx, submit_p, id, argnum, ret);
+    // resave the context to update timestamp
+    context_t context = init_and_save_context(ctx, submit_p, id, argnum, ret);
+    context.ts = args->args[6];
+    save_context_to_buf(submit_p, (void*)&context);
 
     events_perf_submit(ctx);
     return 0;
@@ -1422,6 +1704,85 @@ int trace_ret_##name(void *ctx)                                         \
     return trace_ret_generic(ctx, id, types, tags, &args, ret);         \
 }
 
+static __always_inline void network_to_host_v4(net_conn_v4_t *net_details)
+{
+    net_details->local_address = __bpf_ntohl(net_details->local_address);
+    net_details->local_port = __bpf_ntohs(net_details->local_port);
+    net_details->remote_address = __bpf_ntohl(net_details->remote_address);
+    net_details->remote_port = __bpf_ntohs(net_details->remote_port);
+}
+
+static __always_inline int get_network_details_from_sock_v4(struct sock *sk, net_conn_v4_t *net_details, int peer)
+{
+    struct inet_sock *inet = inet_sk(sk);
+
+    u32 addr = 0;
+    addr = get_inet_rcv_saddr(inet);
+    if ( !addr ) {
+        addr = get_inet_saddr(inet);
+    }
+
+    if ( peer ) {
+
+        net_details->local_address = get_inet_daddr(inet);
+        net_details->local_port = get_inet_dport(inet);
+        net_details->remote_address = addr;
+        net_details->remote_port = get_inet_sport(inet);
+
+    }
+    else {
+
+        net_details->local_address = addr;
+        net_details->local_port = get_inet_sport(inet);
+        net_details->remote_address = get_inet_daddr(inet);
+        net_details->remote_port = get_inet_dport(inet);
+
+    }
+
+    return 0;
+}
+
+static __always_inline struct ipv6_pinfo *inet6_sk_own_impl(struct sock *__sk, struct inet_sock *inet)
+{
+    volatile unsigned char sk_state_own_impl;
+    sk_state_own_impl = get_sock_state(__sk);
+
+    struct ipv6_pinfo *pinet6_own_impl;
+    pinet6_own_impl = get_inet_pinet6(inet);
+
+    bool sk_fullsock = (1 << sk_state_own_impl) & ~(TCPF_TIME_WAIT | TCPF_NEW_SYN_RECV);
+    return sk_fullsock ? pinet6_own_impl : NULL;
+}
+
+static __always_inline int get_network_details_from_sock_v6(struct sock *sk, net_conn_v6_t *net_details, int peer)
+{
+    struct inet_sock *inet = inet_sk(sk);
+    struct ipv6_pinfo *np = inet6_sk_own_impl(sk, inet);
+
+    struct in6_addr addr = {};
+    addr = get_sock_v6_rcv_saddr(sk);
+    if (ipv6_addr_any(&addr)){
+        addr = get_ipv6_pinfo_saddr(np);
+    }
+
+    if ( peer ) {
+
+        net_details->local_address = get_sock_v6_daddr(sk);
+        net_details->local_port = get_inet_dport(inet);
+        net_details->remote_address = addr;
+        net_details->remote_port = get_inet_sport(inet);
+    }
+    else {
+
+        net_details->local_address = addr;
+        net_details->local_port = get_inet_sport(inet);
+        net_details->remote_address = get_sock_v6_daddr(sk);
+        net_details->remote_port = get_inet_dport(inet);
+    }
+
+    return 0;
+}
+
 /*============================== SYSCALL HOOKS ==============================*/
 
 // include/trace/events/syscalls.h:
@@ -1433,7 +1794,7 @@ int tracepoint__raw_syscalls__sys_enter(struct bpf_raw_tracepoint_args *ctx)
     int id = ctx->args[1];
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 
-#if defined(CONFIG_ARCH_HAS_SYSCALL_WRAPPER)
+if (CONFIG_ARCH_HAS_SYSCALL_WRAPPER) {
     struct pt_regs regs = {};
     bpf_probe_read(&regs, sizeof(struct pt_regs), (void*)ctx->args[0]);
 
@@ -1454,14 +1815,14 @@ int tracepoint__raw_syscalls__sys_enter(struct bpf_raw_tracepoint_args *ctx)
         args_tmp.args[4] = PT_REGS_PARM5(&regs);
         args_tmp.args[5] = PT_REGS_PARM6(&regs);
     }
-#else // CONFIG_ARCH_HAS_SYSCALL_WRAPPER
+} else { // NO CONFIG_ARCH_HAS_SYSCALL_WRAPPER
     args_tmp.args[0] = ctx->args[0];
     args_tmp.args[1] = ctx->args[1];
     args_tmp.args[2] = ctx->args[2];
     args_tmp.args[3] = ctx->args[3];
     args_tmp.args[4] = ctx->args[4];
     args_tmp.args[5] = ctx->args[5];
-#endif // CONFIG_ARCH_HAS_SYSCALL_WRAPPER
+} // END CONFIG_ARCH_HAS_SYSCALL_WRAPPER
 
     if (is_compat(task)) {
         // Translate 32bit syscalls to 64bit syscalls so we can send to the correct handler
@@ -1496,6 +1857,10 @@ int tracepoint__raw_syscalls__sys_enter(struct bpf_raw_tracepoint_args *ctx)
         // We passed all filters (in should_trace()) - add this pid to traced pids set
         bpf_map_update_elem(&traced_pids_map, &pid, &pid, BPF_ANY);
     }
+    else if (id == SYSCALL_CONNECT || id == SYSCALL_ACCEPT || id == SYSCALL_ACCEPT4 || id == SYSCALL_BIND || id == SYSCALL_LISTEN) {
+        u32 sockfd = args_tmp.args[0];
+        save_sockfd(sockfd);
+    }
 
     if (event_chosen(RAW_SYS_ENTER)) {
         buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
@@ -1516,6 +1881,8 @@ int tracepoint__raw_syscalls__sys_enter(struct bpf_raw_tracepoint_args *ctx)
 
     // exit, exit_group and rt_sigreturn syscalls don't return - don't save args for them
     if (id != SYS_EXIT && id != SYS_EXIT_GROUP && id != SYS_RT_SIGRETURN) {
+        // save the timestamp at function entry
+        args_tmp.args[6] = bpf_ktime_get_ns()/1000;
         save_args(&args_tmp, id);
     }
 
@@ -1552,14 +1919,8 @@ int tracepoint__raw_syscalls__sys_exit(struct bpf_raw_tracepoint_args *ctx)
     if (!should_trace())
         return 0;
 
-    // fork events may add new pids to the traced pids set
-    // perform this check after should_trace() to only add forked childs of a traced parent
-    if (id == SYS_CLONE || id == SYS_FORK || id == SYS_VFORK) {
-        u32 pid = ret;
-        bpf_map_update_elem(&traced_pids_map, &pid, &pid, BPF_ANY);
-        if (get_config(CONFIG_NEW_PID_FILTER)) {
-            bpf_map_update_elem(&new_pids_map, &pid, &pid, BPF_ANY);
-        }
+    if (id == SYSCALL_CONNECT || id == SYSCALL_ACCEPT || id == SYSCALL_ACCEPT4 || id == SYSCALL_BIND || id == SYSCALL_LISTEN) {
+        del_sockfd();
     }
 
     if (event_chosen(RAW_SYS_EXIT)) {
@@ -1691,19 +2052,118 @@ int syscall__execveat(void *ctx)
 
 /*============================== OTHER HOOKS ==============================*/
 
-SEC("raw_tracepoint/sched_process_exit")
-int tracepoint__sched__sched_process_exit(
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
-void *ctx
-#else
-struct bpf_raw_tracepoint_args *ctx
-#endif
-)
+// include/trace/events/sched.h:
+// TP_PROTO(struct task_struct *parent, struct task_struct *child)
+SEC("raw_tracepoint/sched_process_fork")
+int tracepoint__sched__sched_process_fork(struct bpf_raw_tracepoint_args *ctx)
+{
+    // Note: we don't place should_trace() here so we can keep track of the cgroups in the system
+    struct task_struct *parent = (struct task_struct*)ctx->args[0];
+    struct task_struct *child = (struct task_struct*)ctx->args[1];
+
+    int parent_pid = get_task_host_pid(parent);
+    int child_pid = get_task_host_pid(child);
+
+    container_id_t *container_id = bpf_map_lookup_elem(&pid_to_cont_id_map, &parent_pid);
+    if (container_id != NULL) {
+        // copy the container id of the parent process to the child process
+        bpf_map_update_elem(&pid_to_cont_id_map, &child_pid, &container_id->id, BPF_ANY);
+    }
+
+    if (!should_trace())
+        return 0;
+
+    // fork events may add new pids to the traced pids set
+    // perform this check after should_trace() to only add forked childs of a traced parent
+    bpf_map_update_elem(&traced_pids_map, &child_pid, &child_pid, BPF_ANY);
+    if (get_config(CONFIG_NEW_PID_FILTER)) {
+        bpf_map_update_elem(&new_pids_map, &child_pid, &child_pid, BPF_ANY);
+    }
+
+    if (event_chosen(SCHED_PROCESS_FORK)) {
+        buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+        if (submit_p == NULL)
+            return 0;
+        set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+        context_t context = init_and_save_context(ctx, submit_p, SCHED_PROCESS_FORK, 4 /*argnum*/, 0 /*ret*/);
+        u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+        if (!tags) {
+            return -1;
+        }
+
+        int parent_ns_pid = get_task_ns_pid(parent);
+        int child_ns_pid = get_task_ns_pid(child);
+
+        save_to_submit_buf(submit_p, (void*)&parent_pid, sizeof(int), INT_T, DEC_ARG(0, *tags));
+        save_to_submit_buf(submit_p, (void*)&parent_ns_pid, sizeof(int), INT_T, DEC_ARG(1, *tags));
+        save_to_submit_buf(submit_p, (void*)&child_pid, sizeof(int), INT_T, DEC_ARG(2, *tags));
+        save_to_submit_buf(submit_p, (void*)&child_ns_pid, sizeof(int), INT_T, DEC_ARG(3, *tags));
+
+        events_perf_submit(ctx);
+    }
+
+    return 0;
+}
+
+// include/trace/events/sched.h:
+//TP_PROTO(struct task_struct *p, pid_t old_pid, struct linux_binprm *bprm)
+SEC("raw_tracepoint/sched_process_exec")
+int tracepoint__sched__sched_process_exec(struct bpf_raw_tracepoint_args *ctx)
 {
     if (!should_trace())
         return 0;
 
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    context_t context = init_and_save_context(ctx, submit_p, SCHED_PROCESS_EXEC, 2, 0);
+    struct task_struct *task = (struct task_struct *)ctx->args[0];
+    struct linux_binprm *bprm = (struct linux_binprm *)ctx->args[2];
+
+    if (bprm == NULL) {
+        return -1;
+    }
+
+    int invoked_from_kernel = has_prefix("kworker/", get_task_parent_comm(task), 9);
+    const char *filename = get_binprm_filename(bprm);
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    save_str_to_buf(submit_p, (void *)filename, DEC_ARG(0, *tags));
+    save_to_submit_buf(submit_p, &invoked_from_kernel, sizeof(int), INT_T, DEC_ARG(1, *tags));
+
+    events_perf_submit(ctx);
+    return 0;
+}
+
+// include/trace/events/sched.h:
+// TP_PROTO(struct task_struct *p)
+SEC("raw_tracepoint/sched_process_exit")
+int tracepoint__sched__sched_process_exit(struct bpf_raw_tracepoint_args *ctx)
+{
     u32 pid = bpf_get_current_pid_tgid();
+
+    if (!should_trace()) {
+        // Note: we need to remove the container id here as we always add it to the map in cgroup_attach_task event.
+        bpf_map_delete_elem(&pid_to_cont_id_map, &pid);
+        return 0;
+    }
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    init_and_save_context(ctx, submit_p, SCHED_PROCESS_EXIT, 0, 0);
+
+    // Remove the container id (if any) from pid_to_cont_id_map
+    bpf_map_delete_elem(&pid_to_cont_id_map, &pid);
+
     // Remove pid from traced_pids_map
     bpf_map_delete_elem(&traced_pids_map, &pid);
 
@@ -1721,13 +2181,6 @@ struct bpf_raw_tracepoint_args *ctx
         // Remove pid from new_pids_map
         bpf_map_delete_elem(&new_pids_map, &pid);
     }
-
-    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
-    if (submit_p == NULL)
-        return 0;
-    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
-
-    init_and_save_context(ctx, submit_p, SCHED_PROCESS_EXIT, 0, 0);
 
     events_perf_submit(ctx);
     return 0;
@@ -1749,6 +2202,47 @@ int BPF_KPROBE(trace_do_exit)
     init_and_save_context(ctx, submit_p, DO_EXIT, 0, code);
 
     events_perf_submit(ctx);
+    return 0;
+}
+
+// include/trace/events/sched.h:
+// TP_PROTO(struct cgroup *dst_cgrp, const char *path, struct task_struct *task, bool threadgroup)
+SEC("raw_tracepoint/cgroup_attach_task")
+int tracepoint__cgroup__cgroup_attach_task(struct bpf_raw_tracepoint_args *ctx)
+{
+    // Note: we don't place should_trace() here so we can keep track of the cgroups in the system
+    container_id_t container_id = {0};
+    struct cgroup *dst_cgrp = (struct cgroup*)ctx->args[0];
+    struct task_struct *task = (struct task_struct*)ctx->args[2];
+    const char *cgrp_dirname = get_cgroup_dirname(dst_cgrp);
+
+    bpf_probe_read_str(&container_id.id, CONT_ID_LEN+1, cgrp_dirname);
+
+    if (has_prefix("docker-", (char*)&container_id.id, 8))
+        bpf_probe_read_str(&container_id.id, CONT_ID_LEN+1, cgrp_dirname+7);
+
+    // Only update pid_to_cont_id_map for this pid if no element already exists.
+    // this way, we only keep track of the first level in the cgroup hierarchy
+    int pid = get_task_host_pid(task);
+    bpf_map_update_elem(&pid_to_cont_id_map, &pid, &container_id.id, BPF_NOEXIST);
+
+    if (event_chosen(CGROUP_ATTACH_TASK) && should_trace()) {
+        buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+        if (submit_p == NULL)
+            return 0;
+        set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+        context_t context = init_and_save_context(ctx, submit_p, CGROUP_ATTACH_TASK, 1 /*argnum*/, 0 /*ret*/);
+
+        u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+        if (!tags) {
+            return -1;
+        }
+
+        save_str_to_buf(submit_p, (void *)ctx->args[1], DEC_ARG(0, *tags));
+        events_perf_submit(ctx);
+    }
+
     return 0;
 }
 
@@ -1774,7 +2268,7 @@ int BPF_KPROBE(trace_security_bprm_check)
     buf_t *string_p = get_buf(STRING_BUF_IDX);
     if (string_p == NULL)
         return -1;
-    save_file_path_to_str_buf(string_p, file);
+    save_path_to_str_buf(string_p, &file->f_path);
     u32 *off = get_buf_off(STRING_BUF_IDX);
     if (off == NULL)
         return -1;
@@ -1818,7 +2312,7 @@ int BPF_KPROBE(trace_security_file_open)
     buf_t *string_p = get_buf(STRING_BUF_IDX);
     if (string_p == NULL)
         return -1;
-    save_file_path_to_str_buf(string_p, file);
+    save_path_to_str_buf(string_p, &file->f_path);
     u32 *off = get_buf_off(STRING_BUF_IDX);
     if (off == NULL)
         return -1;
@@ -1832,6 +2326,48 @@ int BPF_KPROBE(trace_security_file_open)
     save_to_submit_buf(submit_p, (void*)&file->f_flags, sizeof(int), INT_T, DEC_ARG(1, *tags));
     save_to_submit_buf(submit_p, &s_dev, sizeof(dev_t), DEV_T_T, DEC_ARG(2, *tags));
     save_to_submit_buf(submit_p, &inode_nr, sizeof(unsigned long), ULONG_T, DEC_ARG(3, *tags));
+
+    events_perf_submit(ctx);
+    return 0;
+}
+
+SEC("kprobe/security_sb_mount")
+int BPF_KPROBE(trace_security_sb_mount)
+{
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_SB_MOUNT, 4 /*argnum*/, 0 /*ret*/);
+
+
+    const char *dev_name = (const char *)PT_REGS_PARM1(ctx);
+    const struct path *path = (const struct path *)PT_REGS_PARM2(ctx);
+    const char *type = (const char *)PT_REGS_PARM3(ctx);
+    unsigned long flags = (unsigned long)PT_REGS_PARM4(ctx);
+
+    // Get per-cpu string buffer
+    buf_t *string_p = get_buf(STRING_BUF_IDX);
+    if (string_p == NULL)
+        return -1;
+    save_path_to_str_buf(string_p, path);
+    u32 *off = get_buf_off(STRING_BUF_IDX);
+    if (off == NULL)
+        return -1;
+
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    save_str_to_buf(submit_p, (void *)dev_name, DEC_ARG(0, *tags));
+    save_str_to_buf(submit_p, (void *)&string_p->buf[*off], DEC_ARG(1, *tags));
+    save_str_to_buf(submit_p, (void *)type, DEC_ARG(2, *tags));
+    save_to_submit_buf(submit_p, &flags, sizeof(unsigned long), ULONG_T, DEC_ARG(3, *tags));
 
     events_perf_submit(ctx);
     return 0;
@@ -1884,7 +2420,6 @@ int BPF_KPROBE(trace_commit_creds)
         return 0;
     set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
 
-    u8 argnum = 0;
     context_t context = init_and_save_context(ctx, submit_p, COMMIT_CREDS, 2 /*argnum*/, 0 /*ret*/);
 
     struct cred *new = (struct cred *)PT_REGS_PARM1(ctx);
@@ -1892,51 +2427,85 @@ int BPF_KPROBE(trace_commit_creds)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     struct cred *old = (struct cred *)READ_KERN(task->real_cred);
 
-    kuid_t old_euid = READ_KERN(old->euid);
-    kuid_t new_euid = READ_KERN(new->euid);
-    kgid_t old_egid = READ_KERN(old->egid);
-    kgid_t new_egid = READ_KERN(new->egid);
-    kuid_t old_fsuid = READ_KERN(old->fsuid);
-    kuid_t new_fsuid = READ_KERN(new->fsuid);
-    kernel_cap_t old_cap_eff = READ_KERN(old->cap_effective);
-    kernel_cap_t new_cap_eff = READ_KERN(new->cap_effective);
+    slim_cred_t old_slim = {0};
+    slim_cred_t new_slim = {0};
+
+    old_slim.uid = READ_KERN(old->uid.val);
+    old_slim.gid = READ_KERN(old->gid.val);
+    old_slim.suid = READ_KERN(old->suid.val);
+    old_slim.sgid = READ_KERN(old->sgid.val);
+    old_slim.euid = READ_KERN(old->euid.val);
+    old_slim.egid = READ_KERN(old->egid.val);
+    old_slim.fsuid = READ_KERN(old->fsuid.val);
+    old_slim.fsgid = READ_KERN(old->fsgid.val);
+
+    new_slim.uid = READ_KERN(new->uid.val);
+    new_slim.gid = READ_KERN(new->gid.val);
+    new_slim.suid = READ_KERN(new->suid.val);
+    new_slim.sgid = READ_KERN(new->sgid.val);
+    new_slim.euid = READ_KERN(new->euid.val);
+    new_slim.egid = READ_KERN(new->egid.val);
+    new_slim.fsuid = READ_KERN(new->fsuid.val);
+    new_slim.fsgid = READ_KERN(new->fsgid.val);
 
     // Currently (2021), there are ~40 capabilities in the Linux kernel which are stored in a u32 array of length 2.
     // This might change in the (not so near) future as more capabilities will be added.
     // For now, we use u64 to store this array in one piece
-    u64 old_cap_eff_arr = old_cap_eff.cap[1];
-    old_cap_eff_arr = (old_cap_eff_arr << 32) + old_cap_eff.cap[0];
-    u64 new_cap_eff_arr = new_cap_eff.cap[1];
-    new_cap_eff_arr = (new_cap_eff_arr << 32) + new_cap_eff.cap[0];
+    kernel_cap_t caps;
+    caps = READ_KERN(old->cap_inheritable);
+    old_slim.cap_inheritable = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(old->cap_permitted);
+    old_slim.cap_permitted = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(old->cap_effective);
+    old_slim.cap_effective = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(old->cap_bset);
+    old_slim.cap_bset = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(old->cap_ambient);
+    old_slim.cap_ambient = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+
+    caps = READ_KERN(new->cap_inheritable);
+    new_slim.cap_inheritable = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(new->cap_permitted);
+    new_slim.cap_permitted = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(new->cap_effective);
+    new_slim.cap_effective = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(new->cap_bset);
+    new_slim.cap_bset = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
+    caps = READ_KERN(new->cap_ambient);
+    new_slim.cap_ambient = ((caps.cap[1] + 0ULL) << 32) + caps.cap[0];
 
     u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
     if (!tags) {
         return -1;
     }
 
-    if (old_euid.val != new_euid.val) {
-        argnum += save_to_submit_buf(submit_p, (void*)&old_euid.val, sizeof(int), INT_T, DEC_ARG(0, *tags));
-        argnum += save_to_submit_buf(submit_p, (void*)&new_euid.val, sizeof(int), INT_T, DEC_ARG(1, *tags));
-    }
+    save_to_submit_buf(submit_p, (void*)&old_slim, sizeof(slim_cred_t), CRED_T, DEC_ARG(0, *tags));
+    save_to_submit_buf(submit_p, (void*)&new_slim, sizeof(slim_cred_t), CRED_T, DEC_ARG(1, *tags));
 
-    if (old_egid.val != new_egid.val) {
-        argnum += save_to_submit_buf(submit_p, (void*)&old_egid.val, sizeof(int), INT_T, DEC_ARG(2, *tags));
-        argnum += save_to_submit_buf(submit_p, (void*)&new_egid.val, sizeof(int), INT_T, DEC_ARG(3, *tags));
-    }
 
-    if (old_fsuid.val != new_fsuid.val) {
-        argnum += save_to_submit_buf(submit_p, (void*)&old_fsuid.val, sizeof(int), INT_T, DEC_ARG(4, *tags));
-        argnum += save_to_submit_buf(submit_p, (void*)&new_fsuid.val, sizeof(int), INT_T, DEC_ARG(5, *tags));
-    }
+    if ((old_slim.uid != new_slim.uid) ||
+        (old_slim.gid != new_slim.gid) ||
+        (old_slim.suid != new_slim.suid) ||
+        (old_slim.sgid != new_slim.sgid) ||
+        (old_slim.euid != new_slim.euid) ||
+        (old_slim.egid != new_slim.egid) ||
+        (old_slim.fsuid != new_slim.fsuid) ||
+        (old_slim.fsgid != new_slim.fsgid) ||
+        (old_slim.cap_inheritable != new_slim.cap_inheritable) ||
+        (old_slim.cap_permitted != new_slim.cap_permitted) ||
+        (old_slim.cap_effective != new_slim.cap_effective) ||
+        (old_slim.cap_bset != new_slim.cap_bset) ||
+        (old_slim.cap_ambient != new_slim.cap_ambient)) {
 
-    if (old_cap_eff_arr != new_cap_eff_arr) {
-        argnum += save_to_submit_buf(submit_p, (void*)&old_cap_eff_arr, sizeof(unsigned long), ULONG_T, DEC_ARG(6, *tags));
-        argnum += save_to_submit_buf(submit_p, (void*)&new_cap_eff_arr, sizeof(unsigned long), ULONG_T, DEC_ARG(7, *tags));
-    }
+        if (get_config(CONFIG_SHOW_SYSCALL)) {
+            int syscall_nr = get_syscall_ev_id_from_regs();
+            if (syscall_nr >= 0) {
+                context.argnum++;
+                save_context_to_buf(submit_p, (void*)&context);
+                save_to_submit_buf(submit_p, (void*)&syscall_nr, sizeof(int), INT_T, DEC_ARG(2, *tags));
+            }
+        }
 
-    if (argnum) {
-        context.argnum = argnum;
-        save_context_to_buf(submit_p, (void*)&context);
         events_perf_submit(ctx);
     }
 
@@ -2064,6 +2633,274 @@ int BPF_KPROBE(trace_cap_capable)
     return 0;
 };
 
+SEC("kprobe/security_socket_create")
+int BPF_KPROBE(trace_security_socket_create)
+{
+    // trace the event security_socket_create
+
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_SOCKET_CREATE, 4 /*argnum*/, 0 /*ret*/);
+
+    // getting event tags
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    int family = (int)PT_REGS_PARM1(ctx);
+    int type = (int)PT_REGS_PARM2(ctx);
+    int protocol = (int)PT_REGS_PARM3(ctx);
+    int kern = (int)PT_REGS_PARM4(ctx);
+
+    save_to_submit_buf(submit_p, (void *)&family, sizeof(int), INT_T, DEC_ARG(0, *tags));
+    save_to_submit_buf(submit_p, (void *)&type, sizeof(int), INT_T, DEC_ARG(1, *tags));
+    save_to_submit_buf(submit_p, (void *)&protocol, sizeof(int), INT_T, DEC_ARG(2, *tags));
+    save_to_submit_buf(submit_p, (void *)&kern, sizeof(int), INT_T, DEC_ARG(3, *tags));
+
+    events_perf_submit(ctx);
+    return 0;
+};
+
+SEC("kprobe/security_socket_listen")
+int BPF_KPROBE(trace_security_socket_listen)
+{
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
+    int backlog = (int)PT_REGS_PARM2(ctx);
+
+    struct sock *sk = get_socket_sock(sock);
+
+    u16 family = get_sock_family(sk);
+    if ( (family != AF_INET) && (family != AF_INET6) ) {
+        return 0;
+    }
+
+    u32 sockfd = -1;
+    load_sockfd(&sockfd);
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_SOCKET_LISTEN, 3 /*argnum*/, 0 /*ret*/);
+
+    // getting event tags
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    save_to_submit_buf(submit_p, (void *)&sockfd, sizeof(u32), INT_T, DEC_ARG(0, *tags));
+
+    if ( family == AF_INET ){
+
+        net_conn_v4_t net_details = {};
+
+        get_network_details_from_sock_v4(sk, &net_details, 0);
+
+        struct sockaddr_in local;
+        local.sin_family = family;
+        local.sin_port = net_details.local_port;
+        local.sin_addr.s_addr = net_details.local_address;
+
+        save_to_submit_buf(submit_p, (void *)&local, sizeof(struct sockaddr_in), SOCKADDR_T, DEC_ARG(1, *tags));
+
+    }
+    else if ( family == AF_INET6 ){
+        net_conn_v6_t net_details = {};
+
+        get_network_details_from_sock_v6(sk, &net_details, 0);
+
+        struct sockaddr_in6 local;
+        local.sin6_family = family;
+        local.sin6_port = net_details.local_port;
+        local.sin6_flowinfo = 0;
+        local.sin6_addr = net_details.local_address;
+        local.sin6_scope_id = 0;
+
+        save_to_submit_buf(submit_p, (void *)&local, sizeof(struct sockaddr_in6), SOCKADDR_T, DEC_ARG(1, *tags));
+    }
+
+    save_to_submit_buf(submit_p, (void *)&backlog, sizeof(int), INT_T, DEC_ARG(2, *tags));
+
+    events_perf_submit(ctx);
+    return 0;
+};
+
+SEC("kprobe/security_socket_connect")
+int BPF_KPROBE(trace_security_socket_connect)
+{
+
+    // trace the event security_socket_connect
+
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
+
+    sa_family_t sa_fam = get_sockaddr_family(address);
+    if ( (sa_fam != AF_INET) && (sa_fam != AF_INET6) ) {
+        return 0;
+    }
+
+    u32 sockfd = -1;
+    load_sockfd(&sockfd);
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_SOCKET_CONNECT, 2 /*argnum*/, 0 /*ret*/);
+
+    // getting event tags
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    save_to_submit_buf(submit_p, (void *)&sockfd, sizeof(u32), INT_T, DEC_ARG(0, *tags));
+
+    if (sa_fam == AF_INET) {
+        // saving to submit buffer
+        save_to_submit_buf(submit_p, (void *)address, sizeof(struct sockaddr_in), SOCKADDR_T, DEC_ARG(1, *tags));
+
+    }
+    else if (sa_fam == AF_INET6) {
+        // saving to submit buffer
+        save_to_submit_buf(submit_p, (void *)address, sizeof(struct sockaddr_in6), SOCKADDR_T, DEC_ARG(1, *tags));
+    }
+
+    events_perf_submit(ctx);
+    return 0;
+};
+
+SEC("kprobe/security_socket_accept")
+int BPF_KPROBE(trace_security_socket_accept)
+{
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
+    struct sock *sk = get_socket_sock(sock);
+
+    u16 family = get_sock_family(sk);
+    if ( (family != AF_INET) && (family != AF_INET6) ) {
+        return 0;
+    }
+
+    u32 sockfd = -1;
+    load_sockfd(&sockfd);
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_SOCKET_ACCEPT, 2 /*argnum*/, 0 /*ret*/);
+
+    // getting event tags
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    save_to_submit_buf(submit_p, (void *)&sockfd, sizeof(u32), INT_T, DEC_ARG(0, *tags));
+
+    if ( family == AF_INET ){
+
+        net_conn_v4_t net_details = {};
+
+        get_network_details_from_sock_v4(sk, &net_details, 0);
+
+        struct sockaddr_in local;
+        local.sin_family = family;
+        local.sin_port = net_details.local_port;
+        local.sin_addr.s_addr = net_details.local_address;
+
+        save_to_submit_buf(submit_p, (void *)&local, sizeof(struct sockaddr_in), SOCKADDR_T, DEC_ARG(1, *tags));
+
+    }
+    else if ( family == AF_INET6 ){
+        net_conn_v6_t net_details = {};
+
+        get_network_details_from_sock_v6(sk, &net_details, 0);
+
+        struct sockaddr_in6 local;
+        local.sin6_family = family;
+        local.sin6_port = net_details.local_port;
+        local.sin6_flowinfo = 0;
+        local.sin6_addr = net_details.local_address;
+        local.sin6_scope_id = 0;
+
+        save_to_submit_buf(submit_p, (void *)&local, sizeof(struct sockaddr_in6), SOCKADDR_T, DEC_ARG(1, *tags));
+    }
+
+    events_perf_submit(ctx);
+    return 0;
+};
+
+SEC("kprobe/security_socket_bind")
+int BPF_KPROBE(trace_security_socket_bind)
+{
+
+    // trace the event security_socket_bind
+
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    struct sockaddr *address = (struct sockaddr *)PT_REGS_PARM2(ctx);
+
+    sa_family_t sa_fam = get_sockaddr_family(address);
+    if ( (sa_fam != AF_INET) && (sa_fam != AF_INET6) ) {
+        return 0;
+    }
+
+    u32 sockfd = -1;
+    load_sockfd(&sockfd);
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_SOCKET_BIND, 2 /*argnum*/, 0 /*ret*/);
+
+    // getting event tags
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags) {
+        return -1;
+    }
+
+    save_to_submit_buf(submit_p, (void *)&sockfd, sizeof(u32), INT_T, DEC_ARG(0, *tags));
+
+    if (sa_fam == AF_INET) {
+        // saving to submit buffer
+        save_to_submit_buf(submit_p, (void *)address, sizeof(struct sockaddr_in), SOCKADDR_T, DEC_ARG(1, *tags));
+
+    }
+    else if (sa_fam == AF_INET6) {
+        // saving to submit buffer
+        save_to_submit_buf(submit_p, (void *)address, sizeof(struct sockaddr_in6), SOCKADDR_T, DEC_ARG(1, *tags));
+    }
+
+    events_perf_submit(ctx);
+    return 0;
+};
+
 SEC("kprobe/send_bin")
 int BPF_KPROBE(send_bin)
 {
@@ -2128,7 +2965,7 @@ int BPF_KPROBE(send_bin)
 
     // Handle full chunks in loop
     #pragma unroll
-    for (i = 0; i < 110; i++) {
+    for (i = 0; i < MAX_BIN_CHUNKS; i++) {
         // Dummy instruction, as break instruction can't be first with unroll optimization
         chunk_size = F_CHUNK_SIZE;
 
@@ -2206,7 +3043,7 @@ static __always_inline int do_vfs_write_writev(struct pt_regs *ctx, u32 event_id
     buf_t *string_p = get_buf(STRING_BUF_IDX);
     if (string_p == NULL)
         return -1;
-    save_file_path_to_str_buf(string_p, file);
+    save_path_to_str_buf(string_p, &file->f_path);
     u32 *off = get_buf_off(STRING_BUF_IDX);
     if (off == NULL)
         return -1;
@@ -2341,7 +3178,7 @@ static __always_inline int do_vfs_write_writev_tail(struct pt_regs *ctx, u32 eve
     buf_t *string_p = get_buf(STRING_BUF_IDX);
     if (string_p == NULL)
         return -1;
-    save_file_path_to_str_buf(string_p, file);
+    save_path_to_str_buf(string_p, &file->f_path);
     u32 *off = get_buf_off(STRING_BUF_IDX);
     if (off == NULL)
         return -1;
@@ -2564,6 +3401,62 @@ int BPF_KPROBE(trace_mprotect_alert)
         }
     }
 
+    return 0;
+}
+
+SEC("kprobe/security_bpf")
+int BPF_KPROBE(trace_security_bpf)
+{
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_BPF, 1 /*argnum*/, 0 /*ret*/);
+
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags)
+        return -1;
+
+    int cmd = (int)PT_REGS_PARM1(ctx);
+
+    /* 1st argument == cmd (int) */
+    save_to_submit_buf(submit_p, (void *)&cmd, sizeof(int), INT_T, DEC_ARG(0, *tags));
+
+    events_perf_submit(ctx);
+    return 0;
+};
+
+SEC("kprobe/security_bpf_map")
+int BPF_KPROBE(trace_security_bpf_map)
+{
+    if (!should_trace())
+        return 0;
+
+    buf_t *submit_p = get_buf(SUBMIT_BUF_IDX);
+    if (submit_p == NULL)
+        return 0;
+
+    set_buf_off(SUBMIT_BUF_IDX, sizeof(context_t));
+
+    context_t context = init_and_save_context(ctx, submit_p, SECURITY_BPF_MAP, 2 /*argnum*/, 0 /*ret*/);
+
+    u64 *tags = bpf_map_lookup_elem(&params_names_map, &context.eventid);
+    if (!tags)
+        return -1;
+
+    struct bpf_map *map = (struct bpf_map *)PT_REGS_PARM1(ctx);
+
+    /* 1st argument == map_id (u32) */
+    save_to_submit_buf(submit_p, (void *)&map->id, sizeof(int), UINT_T, DEC_ARG(0, *tags));
+    /* 2nd argument == map_name (const char *) */
+    save_str_to_buf(submit_p, (void *)&map->name, DEC_ARG(1, *tags));
+
+    events_perf_submit(ctx);
     return 0;
 }
 

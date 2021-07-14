@@ -12,6 +12,8 @@ Tracee is a Runtime Security and forensics tool for Linux. It is using Linux eBP
 Watch a quick video demo of Tracee: <br>
 <a href="https://youtu.be/9qxaOYto_5g"><img src="http://i3.ytimg.com/vi/9qxaOYto_5g/maxresdefault.jpg" width="400"></a>
 
+Check out the [Tracee video hub](https://info.aquasec.com/ebpf-runtime-security) for more.
+
 ## Quickstart
 
 Before you proceed, make sure you follow the [minimum requirements for running Tracee](install/prerequisites.md).
@@ -34,4 +36,3 @@ In some cases, you might want to leverage Tracee's eBPF event collection capabil
 Tracee is composed of the following sub-projects, which are hosted in the aquasecurity/tracee repository:
 - [Tracee-eBPF](https://github.com/aquasecurity/tracee/tree/main/tracee-ebpf) - Linux Tracing and Forensics using eBPF
 - [Tracee-Rules](https://github.com/aquasecurity/tracee/tree/main/tracee-rules) - Runtime Security Detection Engine
-- [libbpgo](https://github.com/aquasecurity/tracee/tree/main/libbpfgo) - Go library for eBPF programming using Linux's [libbpf](https://github.com/libbpf/libbpf)

@@ -2,7 +2,10 @@ package tracee
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,8 +18,9 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	bpf "github.com/aquasecurity/tracee/libbpfgo"
-	"github.com/aquasecurity/tracee/libbpfgo/helpers"
+	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/aquasecurity/libbpfgo/helpers"
+	"github.com/aquasecurity/tracee/tracee-ebpf/tracee/external"
 )
 
 // Config is a struct containing user defined configuration of tracee
@@ -29,6 +33,7 @@ type Config struct {
 	SecurityAlerts     bool
 	maxPidsCache       int // maximum number of pids to cache per mnt ns (in Tracee.pidsInMntns)
 	BPFObjPath         string
+	ChanEvents         chan external.Event
 }
 
 type Filter struct {
@@ -98,6 +103,7 @@ type CaptureConfig struct {
 	FilterFileWrite []string
 	Exec            bool
 	Mem             bool
+	Profile         bool
 }
 
 type OutputConfig struct {
@@ -119,8 +125,8 @@ func (cfg OutputConfig) Validate() error {
 
 // Validate does static validation of the configuration
 func (tc Config) Validate() error {
-	if tc.Filter.EventsToTrace == nil {
-		return fmt.Errorf("eventsToTrace is nil")
+	if tc.Filter == nil || tc.Filter.EventsToTrace == nil {
+		return fmt.Errorf("Filter or EventsToTrace is nil")
 	}
 
 	for _, e := range tc.Filter.EventsToTrace {
@@ -162,7 +168,7 @@ func (tc Config) Validate() error {
 		}
 	}
 	_, err := os.Stat(tc.BPFObjPath)
-	if err == nil {
+	if err != nil {
 		return err
 	}
 
@@ -171,6 +177,12 @@ func (tc Config) Validate() error {
 		return err
 	}
 	return nil
+}
+
+type profilerInfo struct {
+	Times            int64  `json:"times,omitempty"`
+	FileHash         string `json:"file_hash,omitempty"`
+	FirstExecutionTs uint64 `json:"-"`
 }
 
 // Tracee traces system calls and system events using eBPF
@@ -187,6 +199,7 @@ type Tracee struct {
 	printer           eventPrinter
 	stats             statsStore
 	capturedFiles     map[string]int64
+	profiledFiles     map[string]profilerInfo
 	writtenFiles      map[string]string
 	mntNsFirstPid     map[uint32]uint32
 	DecParamName      [2]map[argTag]string
@@ -315,6 +328,7 @@ func New(cfg Config) (*Tracee, error) {
 
 	t.writtenFiles = make(map[string]string)
 	t.capturedFiles = make(map[string]int64)
+	t.profiledFiles = make(map[string]profilerInfo)
 	//set a default value for config.maxPidsCache
 	if t.config.maxPidsCache == 0 {
 		t.config.maxPidsCache = 5
@@ -331,17 +345,20 @@ func New(cfg Config) (*Tracee, error) {
 	}
 
 	if err := os.MkdirAll(t.config.Capture.OutputPath, 0755); err != nil {
+		t.Close()
 		return nil, fmt.Errorf("error creating output path: %v", err)
 	}
 	// Todo: tracee.pid should be in a known constant location. /var/run is probably a better choice
 	err = ioutil.WriteFile(path.Join(t.config.Capture.OutputPath, "tracee.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0640)
 	if err != nil {
+		t.Close()
 		return nil, fmt.Errorf("error creating readiness file: %v", err)
 	}
 
 	// Get refernce to stack trace addresses map
 	StackAddressesMap, err := t.bpfModule.GetMap("stack_addresses")
 	if err != nil {
+		t.Close()
 		return nil, fmt.Errorf("error getting acces to 'stack_addresses' eBPF Map %v", err)
 	}
 	t.StackAddressesMap = StackAddressesMap
@@ -861,6 +878,18 @@ func (t *Tracee) initBPF(bpfObjectPath string) error {
 	return nil
 }
 
+func (t *Tracee) writeProfilerStats(wr io.Writer) error {
+	b, err := json.MarshalIndent(t.profiledFiles, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = wr.Write(b)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Run starts the trace. it will run until interrupted
 func (t *Tracee) Run() error {
 	sig := make(chan os.Signal, 1)
@@ -876,6 +905,21 @@ func (t *Tracee) Run() error {
 	t.eventsPerfMap.Stop()
 	t.fileWrPerfMap.Stop()
 	t.printer.Epilogue(t.stats)
+
+	// capture profiler stats
+	if t.config.Capture.Profile {
+		f, err := os.Create(filepath.Join(t.config.Capture.OutputPath, "tracee.profile"))
+		if err != nil {
+			return fmt.Errorf("unable to open tracee.profile for writing: %s", err)
+		}
+
+		// update SHA for all captured files
+		t.updateFileSHA()
+
+		if err := t.writeProfilerStats(f); err != nil {
+			return fmt.Errorf("unable to write profiler output: %s", err)
+		}
+	}
 
 	// record index of written files
 	if t.config.Capture.FileWrite {
@@ -1085,13 +1129,21 @@ func (t *Tracee) processEvent(ctx *context, args map[argTag]interface{}) error {
 					//TODO: remove dead pid from cache
 					continue
 				}
-				//don't capture same file twice unless it was modified
+
 				sourceFileCtime := sourceFileStat.Sys().(*syscall.Stat_t).Ctim.Nano()
 				capturedFileID := fmt.Sprintf("%d:%s", ctx.MntID, sourceFilePath)
+
+				// create an in-memory profile
+				if t.config.Capture.Profile {
+					t.updateProfile(fmt.Sprintf("%s:%d", filepath.Join(destinationDirPath, fmt.Sprintf("exec.%s", filepath.Base(filePath))), sourceFileCtime), ctx.Ts)
+				}
+
+				//don't capture same file twice unless it was modified
 				lastCtime, ok := t.capturedFiles[capturedFileID]
 				if ok && lastCtime == sourceFileCtime {
 					return nil
 				}
+
 				//capture
 				err = CopyFileByPath(sourceFilePath, destinationFilePath)
 				if err != nil {
@@ -1106,6 +1158,40 @@ func (t *Tracee) processEvent(ctx *context, args map[argTag]interface{}) error {
 	}
 
 	return nil
+}
+
+func getFileHash(fileName string) string {
+	f, _ := os.Open(fileName)
+	if f != nil {
+		defer f.Close()
+		h := sha256.New()
+		_, _ = io.Copy(h, f)
+		return hex.EncodeToString(h.Sum(nil))
+	}
+	return ""
+}
+
+func (t *Tracee) updateProfile(sourceFilePath string, executionTs uint64) {
+	if pf, ok := t.profiledFiles[sourceFilePath]; !ok {
+		t.profiledFiles[sourceFilePath] = profilerInfo{
+			Times:            1,
+			FirstExecutionTs: executionTs,
+		}
+	} else {
+		pf.Times = pf.Times + 1              // bump execution count
+		t.profiledFiles[sourceFilePath] = pf // update
+	}
+}
+
+func (t *Tracee) updateFileSHA() {
+	for k, v := range t.profiledFiles {
+		pathPrefix := strings.Split(k, ".")[0]
+		exeName := strings.Split(strings.Split(k, ".")[1], ":")[0]
+		filePath := fmt.Sprintf("%s.%d.%s", pathPrefix, v.FirstExecutionTs, exeName)
+		fileSHA := getFileHash(filePath)
+		v.FileHash = fileSHA
+		t.profiledFiles[k] = v
+	}
 }
 
 // shouldPrintEvent decides whether or not the given event id should be printed to the output
@@ -1124,7 +1210,7 @@ func (t *Tracee) prepareArgsForPrint(ctx *context, args map[argTag]interface{}) 
 		}
 	}
 	switch ctx.EventID {
-	case SysEnterEventID, SysExitEventID, CapCapableEventID:
+	case SysEnterEventID, SysExitEventID, CapCapableEventID, CommitCredsEventID:
 		//show syscall name instead of id
 		if id, isInt32 := args[t.EncParamName[ctx.EventID%2]["syscall"]].(int32); isInt32 {
 			if event, isKnown := EventsIDToEvent[id]; isKnown {
@@ -1157,6 +1243,13 @@ func (t *Tracee) prepareArgsForPrint(ctx *context, args map[argTag]interface{}) 
 		if typ, isInt32 := args[t.EncParamName[ctx.EventID%2]["type"]].(int32); isInt32 {
 			args[t.EncParamName[ctx.EventID%2]["type"]] = helpers.ParseSocketType(uint32(typ))
 		}
+	case SecuritySocketCreateEventID:
+		if dom, isInt32 := args[t.EncParamName[ctx.EventID%2]["family"]].(int32); isInt32 {
+			args[t.EncParamName[ctx.EventID%2]["family"]] = helpers.ParseSocketDomain(uint32(dom))
+		}
+		if typ, isInt32 := args[t.EncParamName[ctx.EventID%2]["type"]].(int32); isInt32 {
+			args[t.EncParamName[ctx.EventID%2]["type"]] = helpers.ParseSocketType(uint32(typ))
+		}
 	case ConnectEventID, AcceptEventID, Accept4EventID, BindEventID, GetsocknameEventID:
 		if sockAddr, isStrMap := args[t.EncParamName[ctx.EventID%2]["addr"]].(map[string]string); isStrMap {
 			var s string
@@ -1166,6 +1259,26 @@ func (t *Tracee) prepareArgsForPrint(ctx *context, args map[argTag]interface{}) 
 			s = strings.TrimSuffix(s, ",")
 			s = fmt.Sprintf("{%s}", s)
 			args[t.EncParamName[ctx.EventID%2]["addr"]] = s
+		}
+	case SecuritySocketBindEventID, SecuritySocketAcceptEventID, SecuritySocketListenEventID:
+		if sockAddr, isStrMap := args[t.EncParamName[ctx.EventID%2]["local_addr"]].(map[string]string); isStrMap {
+			var s string
+			for key, val := range sockAddr {
+				s += fmt.Sprintf("'%s': '%s',", key, val)
+			}
+			s = strings.TrimSuffix(s, ",")
+			s = fmt.Sprintf("{%s}", s)
+			args[t.EncParamName[ctx.EventID%2]["local_addr"]] = s
+		}
+	case SecuritySocketConnectEventID:
+		if sockAddr, isStrMap := args[t.EncParamName[ctx.EventID%2]["remote_addr"]].(map[string]string); isStrMap {
+			var s string
+			for key, val := range sockAddr {
+				s += fmt.Sprintf("'%s': '%s',", key, val)
+			}
+			s = strings.TrimSuffix(s, ",")
+			s = fmt.Sprintf("{%s}", s)
+			args[t.EncParamName[ctx.EventID%2]["remote_addr"]] = s
 		}
 	case AccessEventID, FaccessatEventID:
 		if mode, isInt32 := args[t.EncParamName[ctx.EventID%2]["mode"]].(int32); isInt32 {
@@ -1231,6 +1344,7 @@ type context struct {
 	PidID    uint32
 	Comm     [16]byte
 	UtsName  [16]byte
+	ContID   [16]byte
 	EventID  int32
 	Retval   int64
 	StackID  uint32
@@ -1555,6 +1669,10 @@ func readArgFromBuff(dataBuff io.Reader) (argTag, interface{}, error) {
 		return argTag, nil, fmt.Errorf("error reading arg tag: %v", err)
 	}
 	switch argType {
+	case u16T:
+		var data uint16
+		err = binary.Read(dataBuff, binary.LittleEndian, &data)
+		res = data
 	case intT:
 		var data int32
 		err = binary.Read(dataBuff, binary.LittleEndian, &data)
@@ -1579,6 +1697,10 @@ func readArgFromBuff(dataBuff io.Reader) (argTag, interface{}, error) {
 		res, err = readSockaddrFromBuff(dataBuff)
 	case alertT:
 		var data alert
+		err = binary.Read(dataBuff, binary.LittleEndian, &data)
+		res = data
+	case credT:
+		var data external.SlimCred
 		err = binary.Read(dataBuff, binary.LittleEndian, &data)
 		res = data
 	case strT:
