@@ -1,0 +1,104 @@
+#
+# Creates the official tracee containers.
+#
+
+ARG BTFHUB=0
+ARG FLAVOR=tracee-core
+
+#
+# tracee-base
+#
+
+FROM alpine:3.23.4@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS tracee-base
+LABEL AS=tracee-base
+USER root
+
+# Upgrade busybox to fix CVE-2024-58251
+# TODO: Remove this when Alpine releases a new version with busybox >= 1.37.0-r20
+RUN apk update && apk upgrade --available busybox busybox-binsh ssl_client
+
+# install base environment
+
+RUN apk --no-cache update && \
+    apk --no-cache add coreutils && \
+    apk --no-cache add sudo curl && \
+    apk --no-cache add libelf zlib zstd && \
+    apk --no-cache add libc6-compat
+
+#
+# tracee-make-base
+#
+
+FROM tracee-base AS tracee-make-base
+LABEL AS=tracee-make-base
+USER root
+
+# Install all dependencies using centralized script
+COPY scripts/ /tmp/scripts/
+RUN /tmp/scripts/installation/install-deps-alpine.sh
+
+# Set up Go environment variables for container
+RUN echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile && \
+    echo 'export GOROOT=/usr/local/go' >> /etc/profile && \
+    echo 'export GOPATH=$HOME/go' >> /etc/profile && \
+    echo 'export GOTOOLCHAIN=auto' >> /etc/profile && \
+    echo 'export PATH=$PATH:$GOPATH/bin' >> /etc/profile
+
+# install bpftool from btfhub
+
+RUN cd /tmp && \
+    git clone https://github.com/aquasecurity/btfhub.git && \
+    cd ./btfhub && \
+    ./3rdparty/bpftool.sh
+
+#
+# tracee-make
+#
+
+FROM tracee-make-base AS tracee-make
+LABEL AS=tracee-make
+ARG BTFHUB
+ARG STATIC
+ARG RELEASE_VERSION
+USER root
+ENV HOME=/tracee
+WORKDIR /tracee
+
+COPY . /tracee
+
+RUN source /etc/profile && \
+    make clean && \
+    BTFHUB=$BTFHUB STATIC=$STATIC RELEASE_VERSION=$RELEASE_VERSION make tracee && \
+    make tracee-operator && \
+    make signatures && \
+    rm -rf ./3rdparty/btfhub/ && \
+    rm -rf ./3rdparty/btfhub-archive/
+
+#
+# tracee-core (tracee-base as base)
+#
+
+FROM tracee-base AS tracee-core
+LABEL AS=tracee-core
+USER root
+ENV HOME=/tracee
+WORKDIR /tracee
+
+RUN apk --no-cache add mandoc
+
+COPY --from=tracee-make /tracee/dist/tracee /tracee
+COPY --from=tracee-make /tracee/dist/tracee-operator /tracee
+COPY --from=tracee-make /tracee/dist/signatures/ /tracee/signatures/
+COPY --from=tracee-make /tracee/docs/man/ /tracee/docs/man/
+COPY --from=tracee-make /tracee/builder/entrypoint.sh /tracee/entrypoint.sh
+
+ENTRYPOINT ["/tracee/entrypoint.sh"]
+
+#
+# tracee
+#
+
+FROM $FLAVOR
+USER root
+ENV HOME=/tracee
+WORKDIR /tracee

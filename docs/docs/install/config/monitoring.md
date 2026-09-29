@@ -1,0 +1,137 @@
+# Monitoring
+
+Tracee provides built-in monitoring capabilities to help you observe its performance and health status. Both features use the same HTTP server endpoint.
+
+## Prometheus Metrics
+
+Tracee exposes Prometheus metrics for performance monitoring of event production, consumption, and detection.
+
+!!! Performance Attention
+    Current Prometheus integration targets performance numbers for event
+    production, consumption and detection. It does not target the detections
+    themselves.
+
+Prometheus scraping is **enabled by default in Kubernetes deployments** at `0.0.0.0:3366/metrics`. For CLI usage, metrics must be explicitly enabled using the `--server metrics` flag (defaults to loopback-only binding at `127.0.0.1:3366`).
+
+### Configuration
+
+**Enable metrics:**
+```yaml
+server:
+  metrics: true
+```
+
+**Custom port:**
+```yaml
+server:
+  http-address: :8080
+  metrics: true
+```
+
+**CLI flags:**
+```console
+tracee --server metrics --server http-address=:8080
+```
+
+!!! Tip
+    Check the [Grafana dashboard tutorial](../../../tutorials/deploy-grafana-dashboard.md) for a complete monitoring setup.
+
+## Health Checks
+
+Tracee can expose a `/healthz` endpoint that returns `OK` if everything is healthy. This follows the [common Kubernetes health check pattern](https://kubernetes.io/docs/reference/using-api/health-checks/).
+
+Health monitoring is **disabled by default**.
+
+### Configuration
+
+**Enable health checks:**
+```yaml
+server:
+  healthz: true
+```
+
+**Custom port:**
+```yaml
+server:
+  http-address: :8080
+  healthz: true
+```
+
+**CLI flags:**
+```console
+tracee --server healthz --server http-address=:8080
+```
+
+## Server Configuration
+
+Both Prometheus metrics and health checks share the same HTTP server. Common configuration options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `http-address` | `127.0.0.1:3366` | HTTP server listen address (loopback only; use `0.0.0.0:3366` for network access) |
+| `metrics` | `true` | Enable Prometheus metrics endpoint |
+| `healthz` | `false` | Enable health check endpoint |
+
+### Example: Full Monitoring Setup
+
+```yaml
+server:
+  http-address: :3366
+  metrics: true
+  healthz: true
+```
+
+This configuration makes available:
+- Prometheus metrics: `http://localhost:3366/metrics`
+- Health check: `http://localhost:3366/healthz`
+
+## Migrating from Wildcard Bind Default
+
+!!! Warning
+    In previous versions, the HTTP server defaulted to binding on all interfaces
+    (`:3366`). The default is now **loopback only** (`127.0.0.1:3366`). If you
+    scrape metrics or run health checks from a remote host, you must set an
+    explicit bind address after upgrading.
+
+### Remote Prometheus Scraping
+
+If a central Prometheus server scrapes Tracee from another machine, add an
+explicit `http-address`:
+
+**CLI:**
+```console
+tracee --server http-address=0.0.0.0:3366 --server metrics
+```
+
+**Config file:**
+```yaml
+server:
+  http-address: "0.0.0.0:3366"
+  metrics: true
+  healthz: true
+```
+
+To bind to a specific network interface instead of all interfaces:
+
+```console
+tracee --server http-address=10.0.0.5:3366 --server metrics
+```
+
+### Kubernetes (Helm)
+
+No action is required for the bind address. The Helm chart explicitly sets
+`0.0.0.0:3366`. To restrict HTTP ingress to Prometheus pods, enable
+`networkPolicy.enabled=true` and adjust `networkPolicy.ingressFrom` to match
+your Prometheus deployment labels.
+
+### pprof Access
+
+The `/debug/pprof/` endpoints are served on the same HTTP address as metrics and
+healthz with no additional access control. pprof heap dumps can expose sensitive
+process memory, so keep the default loopback bind or restrict access via
+NetworkPolicy/firewall rules. For remote debugging, use an SSH tunnel:
+
+```console
+ssh -L 3366:127.0.0.1:3366 tracee-host
+curl http://localhost:3366/debug/pprof/heap
+```

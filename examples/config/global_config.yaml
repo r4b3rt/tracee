@@ -1,0 +1,182 @@
+# Tracee Global Configuration File
+# This file demonstrates all available configuration options for Tracee.
+# Most fields are optional and show example values or defaults.
+
+# Buffer configuration for kernel and pipeline events
+buffers:
+    kernel:
+        events: 1024           # Kernel event buffer size in pages
+        artifacts: 1024        # Kernel artifact buffer size in pages
+        control-plane: 1024    # Kernel control plane buffer size in pages
+    pipeline: 1000             # Pipeline buffer size for event processing
+
+# Data stores configuration
+stores:
+    process:
+        enabled: true  # Enabled by default (can be disabled if needed)
+        # max-processes: 10000  # default: 10K processes
+        # max-threads: 0        # default: 0 (disabled to save memory)
+    dns:
+        enabled: false
+        # max-entries: 5000
+
+# Capabilities configuration
+capabilities:
+    bypass: false
+    # add:
+    #     - cap_sys_admin
+    #     - cap_syslog
+    # drop:
+    #     - cap_chown
+
+# Server configuration for HTTP and gRPC endpoints
+server:
+    http-address: "127.0.0.1:8080"
+    grpc-address: "unix:/var/run/tracee.sock"
+    metrics: true
+    healthz: true
+    pprof: true
+    pyroscope: true
+
+# Enrichment configuration
+enrichment:
+    # CLI flags format:
+    # - container
+    # - container.cgroupfs.path=/host/sys/fs/cgroup
+    # - container.cgroupfs.force
+    # - container.docker.socket=/var/run/docker.sock
+    # - container.containerd.socket=/var/run/containerd/containerd.sock
+    # - container.crio.socket=/var/run/crio/crio.sock
+    # - container.podman.socket=/var/run/podman/podman.sock
+    # - fd-paths
+    # - decoded-data
+    # - environment
+    # - executable-hash
+    # - executable-hash.mode=dev-inode
+    # - user-stack
+    #
+    # Structured format:
+    # container:
+    #     enabled: true
+    #     cgroupfs:
+    #         path: /host/sys/fs/cgroup
+    #         force: false
+    #     docker-socket: /var/run/docker.sock
+    #     containerd-socket: /var/run/containerd/containerd.sock
+    #     crio-socket: /var/run/crio/crio.sock
+    #     podman-socket: /var/run/podman/podman.sock
+    # fd-paths: true
+    # decoded-data: true
+    # environment: false
+    # executable-hash:
+    #     enabled: true
+    #     mode: dev-inode     # Options: none, inode, dev-inode, digest-inode
+    # user-stack: true
+
+# Artifacts capture configuration
+artifacts:
+    # file-write:
+    #     enabled: true
+    #     filters:
+    #         - path=/tmp/*
+    #         - type=regular
+    #         - fd=stdout
+
+    # file-read:
+    #     enabled: true
+    #     filters:
+    #         - path=/etc/*
+    #         - type=regular
+
+    # executable: true
+
+    # kernel-modules: true
+
+    # bpf-programs: true
+
+    # memory-regions: true
+
+    # network:
+    #     enabled: true
+    #     pcap:
+    #         split: single          # Options: single, process, container, command (comma-separated)
+    #         options: filtered      # Options: filtered, none
+    #         snaplen: default       # Options: default, max, headers, or size (e.g., 96b, 4kb)
+
+    # dir:
+    #     path: /tmp/tracee
+    #     clear: false
+
+# Detectors configuration - list of paths to search for YAML detectors
+detectors:
+    # - /path/to/detector/dir
+    # - /another/detector/path
+
+# Logging configuration
+logging:
+    level: info
+    # file: "/path/to/log/file.log"
+    # aggregate:
+    #     enabled: true
+    #     flush-interval: "5s"
+    # filters:
+    #     include:
+    #         msg:
+    #             - SampleMessage1
+    #             - SampleMessage2
+    #         pkg:
+    #             - package1
+    #             - package2
+    #         file:
+    #             - file1.go
+    #             - file2.go
+    #         level:
+    #             - warn
+    #             - error
+    #         regex:
+    #             - ^pattern1
+    #             - ^pattern2
+    #     exclude:
+    #         msg:
+    #             - ExcludedMessage1
+    #         pkg:
+    #             - excludedPackage
+    #         file:
+    #             - excludedFile.go
+    #         level:
+    #             - debug
+    #         regex:
+    #             - ^excludedPattern
+    #         libbpf: true           # Filter out verbose libbpf logs (matches logs starting with "libbpf:")
+    #                                # By default (no filters), all logs including libbpf are shown
+
+# Output configuration
+output:
+    # Destinations define where and how to output events
+    # destinations:
+    #   - name: destination_name
+    #     type: file | webhook | forward
+    #     path: path in case of type == file
+    #     url: url in case of type == webhook or type == forward
+    #     format: json | gotemplate=/path/to/template.tpl | table
+    
+    # Streams route events to destinations with optional filtering
+    # streams:
+    #   - name: stream_name
+    #     destinations: 
+    #       - destination_name
+    #     filters:
+    #       events:
+    #         - event_to_filter
+    #       policies:
+    #         - policy_to_filter
+    #     buffer:
+    #       mode: drop           # Options: drop, block
+    #       size: 1024
+
+    # Output options
+    # options:
+    #     none: false
+    #     sort-events: false
+# Signatures directory for custom signatures
+signatures-dir: ""

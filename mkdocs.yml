@@ -1,47 +1,282 @@
 site_name: Tracee
 site_url: https://aquasecurity.github.io/tracee/
 site_description: Runtime security and forensics using eBPF.
-docs_dir: docs/
+docs_dir: docs
 repo_name: GitHub
 repo_url: https://github.com/aquasecurity/tracee
 edit_uri: ""
 
 nav:
-  - Getting Started: index.md
-  - Installation:
-    - Prerequisites: install/prerequisites.md
-    - eBPF Compilation: install/ebpf-compilation.md
-    - Linux Headers: install/headers.md
-    - Kubernetes: install/kubernetes.md
-  - Integrations: integrations.md
-  - Configuration Options: config.md
-  - Authoring Rules: rules-authoring.md
-  - Available Rules: rules-index.md
-  - FAQ: faq.md
-  - Architecture: architecture.md
-  - Tracing:
-    - Getting Started: tracee-ebpf/index.md
-    - Output Options: tracee-ebpf/output.md
-    - Trace Options: tracee-ebpf/trace-options.md
-    - Capturing Artifacts: tracee-ebpf/capture.md
-    - Overriding OS needed files: tracee-ebpf/override-os-needed-files
+    - Home: index.md
+    - Docs:
+          - Overview: docs/overview.md
+          - Installation:
+                - Overview: docs/install/index.md
+                - Requirements:
+                      - Prerequisites: docs/install/prerequisites.md
+                      - Kernel Symbols: docs/install/kernel-symbols.md
+                      - OS Requirements: docs/install/os-requirements.md
+                      - Capabilities: docs/install/capabilities.md
+                      - LSM BPF Support: docs/install/lsm-support.md
+                      - Mac FAQ: docs/install/mac-faq.md
+                - Getting Started:
+                      - Docker: docs/install/docker.md
+                      - Kubernetes: docs/install/kubernetes.md
+                - Configuration:
+                      - Overview: docs/install/config/index.md
+                      - Kubernetes: docs/install/config/kubernetes.md
+                      - Container Enrichment: docs/install/container-engines.md
+                      - Monitoring: docs/install/config/monitoring.md
+                      - Flag Reference:
+                            - artifacts: docs/flags/artifacts.1.md
+                            - buffers: docs/flags/buffers.1.md
+                            - capabilities: docs/flags/capabilities.1.md
+                            - config: docs/flags/config.1.md
+                            - detectors: docs/flags/detectors.1.md
+                            - enrichment: docs/flags/enrichment.1.md
+                            - events: docs/flags/events.1.md
+                            - logging: docs/flags/logging.1.md
+                            - output: docs/flags/output.1.md
+                            - policy: docs/flags/policy.1.md
+                            - scope: docs/flags/scope.1.md
+                            - server: docs/flags/server.1.md
+                            - signatures-dir: docs/flags/signatures-dir.1.md
+                            - stores: docs/flags/stores.1.md
+                      - Commands Reference:
+                            - list:
+                                  - Overview: docs/flags/list.1.md
+                                  - events: docs/flags/list-events.1.md
+                                  - detectors: docs/flags/list-detectors.1.md
+                                  - policies: docs/flags/list-policies.1.md
+                            - version: docs/flags/version.1.md
+                            - man: docs/flags/man.1.md
+          - Policies:
+                - Overview: docs/policies/index.md
+                - Scopes: docs/policies/scopes.md
+                - Rules: docs/policies/rules.md
+                - Usage:
+                      - CLI: docs/policies/usage/cli.md
+                      - Kubernetes: docs/policies/usage/kubernetes.md
+          - Events:
+                - Overview: docs/events/index.md
+                - Built-in Events:
+                      - Lifecycle:
+                            - sched_process_fork: docs/events/builtin/man/lifecycle/sched_process_fork.md
+                            - sched_process_exec: docs/events/builtin/man/lifecycle/sched_process_exec.md
+                            - sched_process_exit: docs/events/builtin/man/lifecycle/sched_process_exit.md
+                            - do_exit: docs/events/builtin/man/lifecycle/do_exit.md
+                            - sched_switch: docs/events/builtin/man/lifecycle/sched_switch.md
+                            - container_create: docs/events/builtin/man/lifecycle/container_create.md
+                            - container_remove: docs/events/builtin/man/lifecycle/container_remove.md
+                            - existing_container: docs/events/builtin/man/lifecycle/existing_container.md
+                            - init_namespaces: docs/events/builtin/man/lifecycle/init_namespaces.md
+                            - switch_task_ns: docs/events/builtin/man/lifecycle/switch_task_ns.md
+                            - cgroup_mkdir: docs/events/builtin/man/lifecycle/cgroup_mkdir.md
+                            - cgroup_rmdir: docs/events/builtin/man/lifecycle/cgroup_rmdir.md
+                            - cgroup_attach_task: docs/events/builtin/man/lifecycle/cgroup_attach_task.md
+                      - Security:
+                            - Overview: docs/events/builtin/security-events.md
+                            - Anti Debugging: docs/events/builtin/man/security/anti_debugging.md
+                            - ASLR Inspection: docs/events/builtin/man/security/aslr_inspection.md
+                            - Cgroup Notify-On-Release: docs/events/builtin/man/security/cgroup_notify_on_release_modification.md
+                            - Cgroup Release-Agent: docs/events/builtin/man/security/cgroup_release_agent_modification.md
+                            - Core Pattern Modification: docs/events/builtin/man/security/core_pattern_modification.md
+                            - Default Loader Modification: docs/events/builtin/man/security/default_loader_modification.md
+                            - Disk Mount: docs/events/builtin/man/security/disk_mount.md
+                            - Docker Abuse: docs/events/builtin/man/security/docker_abuse.md
+                            - Dropped Executable: docs/events/builtin/man/security/dropped_executable.md
+                            - Dynamic Code Loading: docs/events/builtin/man/security/dynamic_code_loading.md
+                            - Fileless Execution: docs/events/builtin/man/security/fileless_execution.md
+                            - Hidden File Created: docs/events/builtin/man/security/hidden_file_created.md
+                            - Illegitimate Shell: docs/events/builtin/man/security/illegitimate_shell.md
+                            - K8S API Connection: docs/events/builtin/man/security/kubernetes_api_connection.md
+                            - K8S Certificate Theft: docs/events/builtin/man/security/kubernetes_certificate_theft_attempt.md
+                            - Kernel Module Loading: docs/events/builtin/man/security/kernel_module_loading.md
+                            - Loader Preload: docs/events/builtin/man/security/ld_preload.md
+                            - Process VM Write: docs/events/builtin/man/security/process_vm_write_code_injection.md
+                            - Procfs File Ops Hooking: docs/events/builtin/man/security/proc_fops_hooking.md
+                            - Procfs Kcore Read: docs/events/builtin/man/security/proc_kcore_read.md
+                            - Procfs Mem Access: docs/events/builtin/man/security/proc_mem_access.md
+                            - Procfs Mem Code Injection: docs/events/builtin/man/security/proc_mem_code_injection.md
+                            - Ptrace Code Injection: docs/events/builtin/man/security/ptrace_code_injection.md
+                            - RCD Modification: docs/events/builtin/man/security/rcd_modification.md
+                            - Sched Debug: docs/events/builtin/man/security/sched_debug_recon.md
+                            - Scheduled Task Modification: docs/events/builtin/man/security/scheduled_task_modification.md
+                            - Stack Pivot: docs/events/builtin/man/security/stack_pivot.md
+                            - Standard I/O Over Socket: docs/events/builtin/man/security/stdio_over_socket.md
+                            - Sudoers Modification: docs/events/builtin/man/security/sudoers_modification.md
+                            - Syscall Table Hooking: docs/events/builtin/man/security/syscall_table_hooking.md
+                            - SysRQ Modification: docs/events/builtin/man/security/system_request_key_config_modification.md
+                      - Network:
+                            - Overview: docs/events/builtin/network-events.md
+                            - net_flow_tcp_begin: docs/events/builtin/man/network/net_flow_tcp_begin.md
+                            - net_flow_tcp_end: docs/events/builtin/man/network/net_flow_tcp_end.md
+                            - net_packet_ipv4: docs/events/builtin/man/network/net_packet_ipv4.md
+                            - net_packet_ipv6: docs/events/builtin/man/network/net_packet_ipv6.md
+                            - net_packet_tcp: docs/events/builtin/man/network/net_packet_tcp.md
+                            - net_packet_udp: docs/events/builtin/man/network/net_packet_udp.md
+                            - net_packet_icmp: docs/events/builtin/man/network/net_packet_icmp.md
+                            - net_packet_icmpv6: docs/events/builtin/man/network/net_packet_icmpv6.md
+                            - net_packet_dns: docs/events/builtin/man/network/net_packet_dns.md
+                            - net_packet_dns_request: docs/events/builtin/man/network/net_packet_dns_request.md
+                            - net_packet_dns_response: docs/events/builtin/man/network/net_packet_dns_response.md
+                            - net_packet_http: docs/events/builtin/man/network/net_packet_http.md
+                            - net_packet_http_request: docs/events/builtin/man/network/net_packet_http_request.md
+                            - net_packet_http_response: docs/events/builtin/man/network/net_packet_http_response.md
+                      - LSM:
+                            - cap_capable: docs/events/builtin/man/lsm/cap_capable.md
+                            - security_bpf: docs/events/builtin/man/lsm/security_bpf.md
+                            - security_bpf_map: docs/events/builtin/man/lsm/security_bpf_map.md
+                            - security_bpf_prog: docs/events/builtin/man/lsm/security_bpf_prog.md
+                            - security_bprm_check: docs/events/builtin/man/lsm/security_bprm_check.md
+                            - security_file_mprotect: docs/events/builtin/man/lsm/security_file_mprotect.md
+                            - security_file_open: docs/events/builtin/man/lsm/security_file_open.md
+                            - security_inode_mknod: docs/events/builtin/man/lsm/security_inode_mknod.md
+                            - security_inode_rename: docs/events/builtin/man/lsm/security_inode_rename.md
+                            - security_inode_unlink: docs/events/builtin/man/lsm/security_inode_unlink.md
+                            - security_kernel_post_read_file: docs/events/builtin/man/lsm/security_kernel_post_read_file.md
+                            - security_kernel_read_file: docs/events/builtin/man/lsm/security_kernel_read_file.md
+                            - security_mmap_file: docs/events/builtin/man/lsm/security_mmap_file.md
+                            - security_path_notify: docs/events/builtin/man/lsm/security_path_notify.md
+                            - security_sb_mount: docs/events/builtin/man/lsm/security_sb_mount.md
+                            - security_sb_umount: docs/events/builtin/man/lsm/security_sb_umount.md
+                            - security_settime64: docs/events/builtin/man/lsm/security_settime64.md
+                            - security_socket_accept: docs/events/builtin/man/lsm/security_socket_accept.md
+                            - security_socket_bind: docs/events/builtin/man/lsm/security_socket_bind.md
+                            - security_socket_connect: docs/events/builtin/man/lsm/security_socket_connect.md
+                            - security_socket_create: docs/events/builtin/man/lsm/security_socket_create.md
+                            - security_socket_listen: docs/events/builtin/man/lsm/security_socket_listen.md
+                            - security_socket_setsockopt: docs/events/builtin/man/lsm/security_socket_setsockopt.md
+                            - security_task_setrlimit: docs/events/builtin/man/lsm/security_task_setrlimit.md
+                      - Misc:
+                            - __kernel_write: docs/events/builtin/man/misc/__kernel_write.md
+                            - bpf_attach: docs/events/builtin/man/misc/bpf_attach.md
+                            - call_usermodehelper: docs/events/builtin/man/misc/call_usermodehelper.md
+                            - chmod_common: docs/events/builtin/man/misc/chmod_common.md
+                            - commit_creds: docs/events/builtin/man/misc/commit_creds.md
+                            - debugfs_create_dir: docs/events/builtin/man/misc/debugfs_create_dir.md
+                            - debugfs_create_file: docs/events/builtin/man/misc/debugfs_create_file.md
+                            - device_add: docs/events/builtin/man/misc/device_add.md
+                            - dirty_pipe_splice: docs/events/builtin/man/misc/dirty_pipe_splice.md
+                            - do_init_module: docs/events/builtin/man/misc/do_init_module.md
+                            - do_mmap: docs/events/builtin/man/misc/do_mmap.md
+                            - do_sigaction: docs/events/builtin/man/misc/do_sigaction.md
+                            - do_truncate: docs/events/builtin/man/misc/do_truncate.md
+                            - file_modification: docs/events/builtin/man/misc/file_modification.md
+                            - ftrace_hook: docs/events/builtin/man/security/ftrace_hook.md
+                            - hidden_kernel_module: docs/events/builtin/man/security/hidden_kernel_module.md
+                            - hooked_seq_ops: docs/events/builtin/man/misc/hooked_seq_ops.md
+                            - hooked_syscall: docs/events/builtin/man/security/hooked_syscall.md
+                            - inotify_watch: docs/events/builtin/man/misc/inotify_watch.md
+                            - kallsyms_lookup_name: docs/events/builtin/man/misc/kallsyms_lookup_name.md
+                            - kprobe_attach: docs/events/builtin/man/misc/kprobe_attach.md
+                            - load_elf_phdrs: docs/events/builtin/man/misc/load_elf_phdrs.md
+                            - magic_write: docs/events/builtin/man/misc/magic_write.md
+                            - mem_prot_alert: docs/events/builtin/man/security/mem_prot_alert.md
+                            - net_tcp_connect: docs/events/builtin/man/misc/net_tcp_connect.md
+                            - print_mem_dump: docs/events/builtin/man/misc/print_mem_dump.md
+                            - proc_create: docs/events/builtin/man/misc/proc_create.md
+                            - process_execute_failed: docs/events/builtin/man/misc/process_execute_failed.md
+                            - register_chrdev: docs/events/builtin/man/misc/register_chrdev.md
+                            - set_fs_pwd: docs/events/builtin/man/misc/set_fs_pwd.md
+                            - shared_object_loaded: docs/events/builtin/man/misc/shared_object_loaded.md
+                            - socket_accept: docs/events/builtin/man/misc/socket_accept.md
+                            - socket_dup: docs/events/builtin/man/misc/socket_dup.md
+                            - suspicious_syscall_source: docs/events/builtin/man/security/suspicious_syscall_source.md
+                            - symbols_collision: docs/events/builtin/man/misc/symbols_collision.md
+                            - symbols_loaded: docs/events/builtin/man/security/symbols_loaded.md
+                            - task_rename: docs/events/builtin/man/misc/task_rename.md
+                            - tracee_info: docs/events/builtin/man/misc/tracee_info.md
+                            - vfs_read: docs/events/builtin/man/misc/vfs_read.md
+                            - vfs_readv: docs/events/builtin/man/misc/vfs_readv.md
+                            - vfs_utimes: docs/events/builtin/man/misc/vfs_utimes.md
+                            - vfs_write: docs/events/builtin/man/misc/vfs_write.md
+                            - vfs_writev: docs/events/builtin/man/misc/vfs_writev.md
+                      - Syscalls:
+                            - Overview: docs/events/builtin/syscall-events.md
+                            - sys_enter: docs/events/builtin/man/syscalls/sys_enter.md
+                            - sys_exit: docs/events/builtin/man/syscalls/sys_exit.md
+                - Custom Events:
+                      - Overview: docs/events/custom/overview.md
+                      - Go: docs/events/custom/golang.md
+          - Detectors:
+                - Overview: docs/detectors/index.md
+                - Quick Start: docs/detectors/quickstart.md
+                - YAML Detectors: docs/detectors/yaml-detectors.md
+                - API Reference: docs/detectors/api-reference.md
+                - DataStore API: docs/detectors/datastore-api.md
+          - Output:
+                - Overview: docs/outputs/index.md
+                - Formats: docs/outputs/output-formats.md
+                - Streams: docs/outputs/streams.md
+                - Event Structure: docs/outputs/event-structure.md
+                - Sorting Events: docs/outputs/sorting-events.md
+                - Logging: docs/outputs/logging.md
+          - Forensics:
+                - Overview: docs/forensics.md
+          - Security Model: docs/security-model.md
+          - Troubleshooting: docs/troubleshooting.md
+    - Traceectl: 
+          - Overview: traceectl/index.md
+          - Installation: traceectl/usage.md
+          - Commands:
+                - event: traceectl/commands/event.md
+                - metrics: traceectl/commands/metrics.md
+                - stream: traceectl/commands/stream.md
+                - version: traceectl/commands/version.md
+          - Flags:
+                - output: traceectl/flags/output.md
+                - format: traceectl/flags/format.md
+                - server: traceectl/flags/server.md
+                - policy: traceectl/flags/policy.md
+    - Tutorials:
+          - Overview: tutorials/overview.md
+          - Cosign - verify Tracee signature: tutorials/verify-tracee-signature.md
+          - Access Tracee Metrics in Grafana and Prometheus: tutorials/deploy-grafana-dashboard.md
+          - Using Tracee Container Image with Vagrant on Mac: tutorials/tracee-vagrant.md
+          - Working with Tracee's Policies on Kubernetes: tutorials/k8s-policies.md
+          - Accessing Tracee Logs through Promtail and Loki: tutorials/promtail.md
+          - Additional Resources: tutorials/additional-resources.md
+    - Contributing:
+          - Overview: contributing/overview.md
+          - Guidelines: contributing/guidelines.md
+          - PR Validation (Checkpatch): contributing/checkpatch.md
+          - Adding New Events: contributing/adding-events.md
+          - Event Documentation Guide: contributing/event-documentation-guide.md
+          - Code Coverage: contributing/testing-coverage.md
+          - Performance: contributing/performance.md
+          - Event Generator (evt): contributing/evt-tool.md
+          - Kubernetes: contributing/kubernetes.md
+          - Setup Development Machine with Vagrant: contributing/setup-development-machine-with-vagrant.md
+          - Building:
+                - Building Tracee: contributing/building/building.md
+                - Building Environment: contributing/building/environment.md
+                - Building Containers: contributing/building/containers.md
 
 theme:
     name: material
-    language: 'en'
+    language: "en"
     logo: images/tracee_logo_only.png
+    features:
+        - navigation.tabs
+        - navigation.tabs.sticky
+        - navigation.sections
+        - content.tabs.link
+        - content.code.copy
 
 markdown_extensions:
-  - pymdownx.highlight
-  - pymdownx.superfences
-  - admonition
+    - pymdownx.highlight
+    - pymdownx.superfences
+    - admonition
+    - toc:
+          permalink: true
 
 extra:
-  generator: false
-  version:
-    method: mike
-    provider: mike
+    generator: false
+    version:
+        method: mike
+        provider: mike
 
 plugins:
-  - search
-  - macros
+    - search
+    - macros

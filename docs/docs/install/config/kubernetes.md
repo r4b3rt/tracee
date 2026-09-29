@@ -1,0 +1,64 @@
+# Configuring Tracee in Kubernetes
+
+In Kubernetes, Tracee uses a ConfigMap, called `tracee` to make Tracee configuration accessible. The ConfigMap includes a data file called `config.yaml` with the desired configuration. For example:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: tracee
+    app.kubernetes.io/component: tracee
+    app.kubernetes.io/part-of: tracee
+  name: tracee
+data:
+  config.yaml: |-
+    output:
+      json:
+        files:
+          - /var/log/tracee.json
+    enrichment:
+      decoded-data: true
+```
+
+## Kubectl
+
+You can use `kubectl` to interact with it:
+
+View:
+
+```shell
+kubectl get cm tracee-config -n tracee
+```
+
+Edit:
+
+```shell
+kubectl edit cm tracee-config -n tracee
+```
+
+## Helm
+
+You can customize specific options with the helm installation:
+
+```
+helm install tracee aqua/tracee \
+        --namespace tracee --create-namespace \
+        --set config.kernelBlob=1024
+```
+
+or after installation:
+
+```
+helm install tracee aqua/tracee \
+        --namespace tracee --create-namespace \
+        --set config.output.format=table
+```
+
+or to provide a complete config file:
+
+```
+ helm install tracee aqua/tracee \
+        --namespace tracee --create-namespace \
+        --set-file configFile=myconfig.yaml
+```

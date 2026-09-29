@@ -1,0 +1,57 @@
+# Docs
+
+In this section you can find the complete reference documentation for all of the different features and settings that Tracee has to offer.
+
+## Why Choose Tracee?
+
+Tracee stands out from other security and observability tools through several key differentiators:
+
+### 🎯 Everything is an Event
+Unlike tools that separate raw data from detections, Tracee presents **everything as events** - from low-level system calls to high-level security detections. This unified approach lets you:
+
+- Combine different event types in the same policy
+- Build complex detection logic across multiple data sources
+- Maintain a consistent view of your system's behavior
+
+### 📊 Rich Event Coverage with Minimal Effort
+Tracee provides extensive built-in events out of the box:
+
+- **400+ system calls** for comprehensive system monitoring
+- **Network events** including DNS, HTTP, and packet analysis
+- **Security events** with pre-built threat detection signatures
+- **Container events** with native Kubernetes integration
+
+### 🛠️ Simplicity without Compromise
+Create powerful policies with just a few lines of YAML:
+
+- **Intuitive syntax** for scoping and filtering
+- **Flexible targeting** from global to container-specific
+- **Easy deployment** across development and production environments
+
+### 🔍 Forensic Capabilities
+Go beyond detection with artifact collection:
+
+- **Network traffic capture** for detailed analysis
+- **Binary collection** for malware investigation
+- **Memory dumps** for advanced forensics
+- **File artifacts** for compliance and auditing
+
+### 🔗 Unified Architecture
+Everything works together seamlessly:
+
+- Events flow through the same processing pipeline
+- Policies can reference any combination of event types
+- Custom signatures integrate naturally with built-in events
+- Single configuration controls the entire system
+
+### 🔒 Clear Security Model
+Tracee provides transparency about its capabilities and limitations:
+
+- **Strong protection** against userspace adversaries through eBPF's tamper-resistant architecture
+- **Best-effort detection** of kernel-level threats with rootkit detection signatures
+- **Clear boundaries** documented to set proper expectations
+- See the [Security Model](security-model.md) for detailed information about Tracee's adversary model and security guarantees
+
+---
+
+👈 Please use the side-navigation on the left in order to browse the different topics.

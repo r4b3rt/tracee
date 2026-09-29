@@ -1,0 +1,18 @@
+---
+description: Forbid AI typography Unicode and hidden characters in all content
+alwaysApply: false
+---
+
+# Text ASCII Safety
+
+All new or modified content must be plain ASCII in the allowed ranges:
+`\x09`, `\x0A`, and `\x20-\x7E`.
+
+- Typographic Unicode and hidden/control characters are forbidden.
+- Run checks only on changed files (staged or diff range), not full-repo scans.
+
+## Changed Files Check
+
+```bash
+.cursor/hooks/ascii-check-changed.sh staged
+```

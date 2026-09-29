@@ -1,0 +1,21 @@
+#
+# Daily Test: Run full PR test suite against upstream libbpfgo (main branch)
+#
+name: Upstream libbpfgo Compatibility
+
+on:
+  workflow_dispatch: {}
+
+  schedule:
+    # Daily at 03:00 UTC
+    - cron: "0 3 * * *"
+
+permissions: {}
+
+jobs:
+  pr-tests:
+    uses: ./.github/workflows/pr.yaml
+    with:
+      upstream_libbpfgo: true
+    permissions:
+      contents: read

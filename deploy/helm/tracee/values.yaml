@@ -1,0 +1,187 @@
+# Default values for tracee.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  repository: docker.io/aquasec/tracee
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+# hostPID configures Tracee pods to use the host's pid namespace.
+hostPID: true
+
+securityContext:
+  privileged: true
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: "1"
+  #   memory: "1Gi"
+  # requests:
+  #   cpu: "1"
+  #   memory: "1Gi"
+
+nodeSelector: {}
+
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+  - effect: NoExecute
+    operator: Exists
+
+affinity: {}
+
+# extraWebhookTemplates is a list of additional webhook templates that can be used by
+# the configFile or config.output.webhook fields
+# in the example below, the goTemplate content will be mounted as /tracee/templates/template1.tmpl
+extraWebhookTemplates: []
+# - name: "template1.tmpl"
+#   goTemplate: |
+#   {
+#     "hostname": "{{ .HostName }}",
+#     "message": "Signature name: \"{{ .Metadata.Properties.signatureName }}\" description:\n{{ .Metadata.Description }}",
+#     "severity": "{{ .Metadata.Properties.Severity }}",
+#     "time": "{{ dateInZone "2006-01-02T15:04:05Z" (now) "UTC" }}",
+#     "tags": {
+#       "category": "{{ .Metadata.Properties.Category }}",
+#       "external_id": "{{ .Metadata.Properties.external_id }}",
+#       "signature_id": "{{ .Metadata.Properties.signatureId }}"
+#     }
+#   }
+
+# The configFile field specifies the Tracee configuration file path and can be
+# changed directly via CLI command using --set-file configFile=myconfig.yaml
+configFile: {}
+
+# This config field holds default values for Tracee configuration and each field
+# can be changed individually via CLI command, using --set config.field=value
+config:
+  kernelEvents: ""
+  kernelArtifacts: ""
+  kernelControlPlane: ""
+  pipeline: ""
+  server:
+    # Bind to all interfaces so kubelet probes and Prometheus scraping work.
+    # The CLI default is 127.0.0.1:3366 (loopback only); Kubernetes
+    # deployments need 0.0.0.0 and should rely on NetworkPolicy for access
+    # control.
+    httpAddress: "0.0.0.0:3366"
+    grpcAddress: ""
+    metrics: true
+    healthz: true
+    pprof: false
+    pyroscope: false
+  signaturesDir: ""
+  log:
+    level: info
+    # file: "/var/log/tracee.log"
+    # aggregate:
+    #   enabled: true
+    #   flush-interval: "5s"
+    # filters:
+    #   include:
+    #     libbpf: false
+    #     msg:
+    #       - SampleMessage1
+    #       - SampleMessage2
+    #     pkg:
+    #       - package1
+    #       - package2
+    #     file:
+    #       - file1.go
+    #       - file2.go
+    #     level:
+    #       - warn
+    #       - error
+    #     regex:
+    #       - ^pattern1
+    #       - ^pattern2
+    #   exclude:
+    #     msg:
+    #       - ExcludedMessage1
+    #     pkg:
+    #       - excludedPackage
+    #     file:
+    #       - excludedFile.go
+    #     level:
+    #       - debug
+    #     regex:
+    #       - ^excludedPattern
+  enrichment:
+    decoded-data: true
+    user-stack: false
+    environment: false
+    executable-hash:
+      enabled: true
+      mode: dev-inode
+  output:
+    format: json
+    sortEvents: false
+    # uncomment config.output.webhook to enable a single webhook
+    # to configure multiple webhooks, use the configFile field
+    # webhook:
+    #   name: "webhook1"
+    #   contentType: "application/json"
+    #   goTemplate: "/tracee/templates/template1.tmpl"
+    #   host: ""
+    #   port: "8080"
+    #   protocol: http
+    #   timeout: 3s
+  stores:
+    dns:
+      enabled: ""
+      maxEntries: ""
+    process:
+      enabled: ""
+      maxProcesses: ""
+      maxThreads: ""
+
+# networkPolicy restricts which pods can reach Tracee's HTTP port. Enable this
+# to limit access to the metrics/healthz/pprof endpoints in-cluster.
+# NOTE: When enabled, only pods matching ingressFrom are allowed to reach
+# Tracee's HTTP port. Override ingressFrom if your Prometheus pods use
+# different labels (e.g. prometheus-operator, kube-prometheus-stack).
+networkPolicy:
+  enabled: false
+  # ingressFrom selects the pods allowed to reach port 3366. The example below
+  # permits only pods labelled app.kubernetes.io/name=prometheus.  Override
+  # with any valid NetworkPolicyPeer list matching your Prometheus deployment.
+  ingressFrom:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+
+defaultPolicy: true
+
+operator:
+  create: true
+  name: "tracee-operator"
+  serviceAccount:
+    name: "tracee-operator"
+  healthProbeBindAddress: :8081
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

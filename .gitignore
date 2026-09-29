@@ -1,8 +1,55 @@
+# .check* files are needed so .PHONY dependencies in makefile aren't
+# built each time you try to make the target (only if the target
+# dependencies, like source files, changed)
+.check*
+
+# .eval_* files are placeholders as .check* above, but focused on
+# the evaluation of the target, not failing the build if the target
+# is not found
+.eval_*
+
+# .build_* files exist to avoid rebuilding the targets that they are
+# associated with.
+.build_*
+
+# needed for the makefile btfhub building logic
+*.md5
+
+# ignore clangd files
+.clangd
+
+# ignore local and temporary packaging files
+debian
+.ubuntu*
+.package*
+tracee.spec
+
+# ignore Helm subcharts
+deploy/helm/tracee/charts/
+
+# dev related files
 .vscode
 .idea
-/dist
-
 coverage.txt
+integration-coverage.txt
+coverage.html
+compile_commands.json
+.cache*
+.trunk*
+.vagrant
+goenv.mk
 
-.vagrant/
+# binaries and build files
+dist
+*.o
 
+# release files
+release_notes.txt
+
+# Cursor rules - development configuration files
+.cursor/rules/**
+!.cursor/rules/commit-pr-conventions.mdc
+!.cursor/rules/contributing-docs.mdc
+!.cursor/rules/testing-guide.mdc
+!.cursor/rules/text-ascii-safety.mdc
+!.cursor/rules/shell-style-guide.mdc

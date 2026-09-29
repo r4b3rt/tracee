@@ -1,0 +1,64 @@
+{
+    "buffers": {
+        "kernel": {
+            "events": 1024,
+            "artifacts": 1024,
+            "control-plane": 1024
+        },
+        "pipeline": 1000
+    },
+    "stores": {
+        "process": {
+            "enabled": false
+        },
+        "dns": {
+            "enabled": false
+        }
+    },
+    "capabilities": {
+        "bypass": false
+    },
+    "server": {
+        "http-address": "127.0.0.1:8080",
+        "grpc-address": "unix:/var/run/tracee.sock",
+        "metrics": true,
+        "healthz": true,
+        "pprof": true,
+        "pyroscope": true
+    },
+    "enrichment": {},
+    "artifacts": {},
+    "detectors": {},
+    "logging": {
+        "level": "info"
+    },
+    "output": {
+        "destinations": [
+            {
+                "name": "default_destination",
+                "type": "file",
+                "path": "stdout",
+                "url": "",
+                "format": "table"
+            }
+        ],
+        "streams": [
+            {
+                "name": "default_stream",
+                "destinations": [
+                    "default_destination"
+                ],
+                "filters": {
+                    "events": [],
+                    "policies": []
+                },
+                "buffer": {
+                    "mode": "block",
+                    "size": 1024
+                }
+            }
+        ],
+        "options": {}
+    },
+    "signatures-dir": ""
+}

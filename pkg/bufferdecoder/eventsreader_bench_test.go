@@ -1,0 +1,58 @@
+package bufferdecoder
+
+import (
+	"bytes"
+	"testing"
+)
+
+var present = NewTypeDecoder()
+
+func BenchmarkReadSunPathFromBuffer_ShortString(b *testing.B) {
+	buffer := []byte{'H', 'e', 'l', 'l', 'o', 0}
+	max := 10
+	var str string
+
+	for i := 0; i < b.N; i++ {
+		decoder := New(buffer, present)
+		str, _ = readSunPathFromBuffer(decoder, max)
+	}
+	_ = str
+}
+
+func BenchmarkReadSunPathFromBuffer_MediumString(b *testing.B) {
+	buffer := []byte{'T', 'h', 'i', 's', ' ', 'i', 's', ' ', 'a', ' ', 't', 'e', 's', 't', 0}
+	max := 20
+	var str string
+
+	for i := 0; i < b.N; i++ {
+		decoder := New(buffer, present)
+		str, _ = readSunPathFromBuffer(decoder, max)
+	}
+	_ = str
+}
+
+func BenchmarkReadSunPathFromBuffer_LongString(b *testing.B) {
+	buffer := append(bytes.Repeat([]byte{'A'}, 10000), 0)
+	max := 10000
+	var str string
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		decoder := New(buffer, present)
+		str, _ = readSunPathFromBuffer(decoder, max)
+	}
+	_ = str
+}
+
+func BenchmarkReadSunPathFromBuffer_LongStringLowMax(b *testing.B) {
+	buffer := bytes.Repeat([]byte{'A'}, 10000)
+	max := 100
+	var str string
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		decoder := New(buffer, present)
+		str, _ = readSunPathFromBuffer(decoder, max)
+	}
+	_ = str
+}

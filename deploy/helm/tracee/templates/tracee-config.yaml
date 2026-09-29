@@ -1,0 +1,211 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracee-config
+  labels:
+    {{- include "tracee.labels" . | nindent 4 }}
+data:
+  {{- if .Values.configFile }}
+  config.yaml:
+    {{- toYaml .Values.configFile | nindent 4 }}
+  {{- else }}
+  config.yaml: |-
+    {{- if or .Values.config.kernelEvents .Values.config.kernelArtifacts .Values.config.kernelControlPlane .Values.config.pipeline }}
+    buffers:
+        {{- if or .Values.config.kernelEvents .Values.config.kernelArtifacts .Values.config.kernelControlPlane }}
+        kernel:
+            {{- if .Values.config.kernelEvents }}
+            events: {{ .Values.config.kernelEvents }}
+            {{- end }}
+            {{- if .Values.config.kernelArtifacts }}
+            artifacts: {{ .Values.config.kernelArtifacts }}
+            {{- end }}
+            {{- if .Values.config.kernelControlPlane }}
+            control-plane: {{ .Values.config.kernelControlPlane }}
+            {{- end }}
+        {{- end }}
+        {{- if .Values.config.pipeline }}
+        pipeline: {{ .Values.config.pipeline }}
+        {{- end }}
+    {{- end }}
+    {{- if or .Values.config.server.httpAddress .Values.config.server.metrics .Values.config.server.healthz .Values.config.server.pprof .Values.config.server.pyroscope }}
+    server:
+        {{- if .Values.config.server.httpAddress }}
+        http-address: {{ .Values.config.server.httpAddress | quote }}
+        {{- end }}
+        {{- if .Values.config.server.grpcAddress }}
+        grpc-address: {{ .Values.config.server.grpcAddress | quote }}
+        {{- end }}
+        {{- if .Values.config.server.metrics }}
+        metrics: {{ .Values.config.server.metrics }}
+        {{- end }}
+        {{- if .Values.config.server.healthz }}
+        healthz: {{ .Values.config.server.healthz }}
+        {{- end }}
+        {{- if .Values.config.server.pprof }}
+        pprof: {{ .Values.config.server.pprof }}
+        {{- end }}
+        {{- if .Values.config.server.pyroscope }}
+        pyroscope: {{ .Values.config.server.pyroscope }}
+        {{- end }}
+    {{- end }}
+    {{- if .Values.config.signaturesDir }}
+    signatures-dir: {{ .Values.config.signaturesDir }}
+    {{- end }}
+    log:
+        level: {{ .Values.config.log.level }}
+        {{- if .Values.config.log.file }}
+        file: {{ .Values.config.log.file }}
+        {{- end }}
+        {{- if .Values.config.log.aggregate }}
+        aggregate:
+            enabled: {{ .Values.config.log.aggregate.enabled | default false }}
+            {{- if .Values.config.log.aggregate.flushInterval }}
+            flush-interval: {{ .Values.config.log.aggregate.flushInterval }}
+            {{- end }}
+        {{- end }}
+        {{- if .Values.config.log.filters }}
+        filters:
+            {{- if .Values.config.log.filters.libbpf }}
+            libbpf: {{ .Values.config.log.filters.libbpf }}
+            {{- end }}
+            {{- if .Values.config.log.filters.include }}
+            include:
+                {{- if .Values.config.log.filters.include.msg }}
+                msg:
+                    {{- range .Values.config.log.filters.include.msg }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.include.pkg }}
+                pkg:
+                    {{- range .Values.config.log.filters.include.pkg }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.include.file }}
+                file:
+                    {{- range .Values.config.log.filters.include.file }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.include.level }}
+                level:
+                    {{- range .Values.config.log.filters.include.level }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.include.regex }}
+                regex:
+                    {{- range .Values.config.log.filters.include.regex }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.include.libbpf }}
+                libbpf: {{ .Values.config.log.filters.include.libbpf }}
+                {{- end }}
+            {{- end }}
+            {{- if .Values.config.log.filters.exclude }}
+            exclude:
+                {{- if .Values.config.log.filters.exclude.msg }}
+                msg:
+                    {{- range .Values.config.log.filters.exclude.msg }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.exclude.pkg }}
+                pkg:
+                    {{- range .Values.config.log.filters.exclude.pkg }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.exclude.file }}
+                file:
+                    {{- range .Values.config.log.filters.exclude.file }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.exclude.level }}
+                level:
+                    {{- range .Values.config.log.filters.exclude.level }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .Values.config.log.filters.exclude.regex }}
+                regex:
+                    {{- range .Values.config.log.filters.exclude.regex }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+            {{- end }}
+        {{- end }}
+    {{- $enrichment := .Values.config.enrichment }}
+    {{- if or (index $enrichment "decoded-data") (index $enrichment "user-stack") (index $enrichment "environment") (or (index (index $enrichment "executable-hash") "enabled") (index (index $enrichment "executable-hash") "mode")) }}
+    enrichment:
+        {{- if (index $enrichment "decoded-data") }}
+        decoded-data: {{ index $enrichment "decoded-data" }}
+        {{- end }}
+        {{- if (index $enrichment "user-stack") }}
+        user-stack: {{ index $enrichment "user-stack" }}
+        {{- end }}
+        {{- if (index $enrichment "environment") }}
+        environment: {{ index $enrichment "environment" }}
+        {{- end }}
+        {{- $execHash := index $enrichment "executable-hash" }}
+        {{- if or (index $execHash "enabled") (index $execHash "mode") }}
+        executable-hash:
+            {{- if (index $execHash "enabled") }}
+            enabled: {{ index $execHash "enabled" }}
+            {{- end }}
+            {{- if (index $execHash "mode") }}
+            mode: {{ index $execHash "mode" }}
+            {{- end }}
+        {{- end }}
+    {{- end }}
+    output:
+        destinations:
+            - name: stdout_json
+              type: file
+              format: {{ .Values.config.output.format | default "json" }}
+              path: stdout
+        sort-events: {{ .Values.config.output.sortEvents }}
+        {{- with .Values.config.output.webhook }}
+        webhook:
+            - {{ .name | default "webhook1" }}:
+                protocol: {{ .protocol | default "http" }}
+                host: {{ .host | default "localhost" }}
+                port: {{ .port | default "8080" }}
+                {{ if .timeout }}
+                timeout: {{ .timeout }}
+                {{- end }}
+                gotemplate: {{ .goTemplate }}
+                {{- if .contentType }}
+                content-type: {{ .contentType }}
+                {{- end }}
+        {{- end }}
+    {{- if or .Values.config.stores.dns.enabled .Values.config.stores.dns.maxEntries .Values.config.stores.process.enabled .Values.config.stores.process.maxProcesses .Values.config.stores.process.maxThreads }}
+    stores:
+        {{- if or .Values.config.stores.dns.enabled .Values.config.stores.dns.maxEntries }}
+        dns:
+            {{- if .Values.config.stores.dns.enabled }}
+            enabled: {{ .Values.config.stores.dns.enabled }}
+            {{- end }}
+            {{- if .Values.config.stores.dns.maxEntries }}
+            max-entries: {{ .Values.config.stores.dns.maxEntries }}
+            {{- end }}
+        {{- end }}
+        {{- if or .Values.config.stores.process.enabled .Values.config.stores.process.maxProcesses .Values.config.stores.process.maxThreads }}
+        process:
+            {{- if .Values.config.stores.process.enabled }}
+            enabled: {{ .Values.config.stores.process.enabled }}
+            {{- end }}
+            {{- if .Values.config.stores.process.maxProcesses }}
+            max-processes: {{ .Values.config.stores.process.maxProcesses }}
+            {{- end }}
+            {{- if .Values.config.stores.process.maxThreads }}
+            max-threads: {{ .Values.config.stores.process.maxThreads }}
+            {{- end }}
+        {{- end }}
+    {{- end }}
+  {{- end }}

@@ -1,0 +1,10 @@
+name: Run Integration Tests
+description: |
+  Run integration test suite with full eBPF kernel integration.
+runs:
+  using: composite
+  steps:
+    - name: Run Integration Tests
+      run: |
+        env "PATH=${PATH}" make test-integration
+      shell: bash

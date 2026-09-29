@@ -1,0 +1,239 @@
+package pcaps
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/google/gopacket/pcapgo"
+
+	"github.com/aquasecurity/tracee/common/errfmt"
+	"github.com/aquasecurity/tracee/common/fileutil"
+	"github.com/aquasecurity/tracee/common/logger"
+	"github.com/aquasecurity/tracee/pkg/config"
+	"github.com/aquasecurity/tracee/types/trace"
+)
+
+var outputDirectory *os.Root
+
+const (
+	pcapDir       string = "pcap/"
+	pcapSingleDir string = pcapDir
+	pcapProcDir   string = pcapDir + "processes/"
+	pcapContDir   string = pcapDir + "containers/"
+	pcapCommDir   string = pcapDir + "commands/"
+)
+
+const (
+	pcapsToCache   = 100 // number of pcaps to keep cached in LRU cache
+	flushAtPackets = 1   // flush pcap file after X number of packets
+)
+
+// TODO: flush per interval as well (so we can grow flushAtPackets higher)
+
+const AF_INET = 2
+const AF_INET6 = 10
+
+//
+// Functions
+//
+
+func initializeGlobalVars(output *os.Root) {
+	outputDirectory = output // where to save pcap files
+}
+
+// getItemIndexFromEvent returns correct trace.Event variable according to
+// given PcapType
+func getItemIndexFromEvent(event *trace.Event, itemType PcapType) string {
+	switch itemType {
+	case Single:
+		return itemType.String()
+	case Process:
+		return fmt.Sprint(event.HostThreadID)
+	case Container:
+		return event.Container.ID
+	case Command:
+		// index by using container_id and comm (to avoid having all
+		// captured packets in command/host/XXX, as it would occur if
+		// indexing by container_id only).
+		ret := fmt.Sprintf("%s:%s", event.Container.ID, event.ProcessName)
+		return ret
+	}
+
+	return ""
+}
+
+// getPcapFileName returns a string used to create a pcap file under the
+// capture output directory.
+func getPcapFileName(event *trace.Event, pcapType PcapType) (string, error) {
+	var err error
+
+	contID := getContainerID(event.Container.ID)
+
+	// create needed dirs
+	err = mkdirForPcapType(outputDirectory, contID, pcapType)
+	if err != nil {
+		return "", errfmt.WrapError(err)
+	}
+
+	// return filename in format according to pcap type
+	return getFileStringFormat(event, contID, pcapType), nil
+}
+
+// getContainerID returns the container string to be used in pcap files or dirs
+func getContainerID(contID string) string {
+	if contID == "" {
+		return "host"
+	}
+	if len(contID) > 11 {
+		contID = contID[0:11]
+	}
+
+	return contID
+}
+
+// getFileStringFormat creates the string that will hold the pcap filename
+func getFileStringFormat(e *trace.Event, c string, t PcapType) string {
+	var format string
+
+	processName := strings.ReplaceAll(e.ProcessName, "/", "_")
+
+	switch t {
+	case Single:
+		format = fmt.Sprintf(
+			"%s%s.pcap", // single.pcap
+			pcapSingleDir,
+			strings.ToLower(t.String()),
+		)
+	case Process:
+		format = fmt.Sprintf(
+			pcapProcDir+"%v/%v_%v_%v.pcap",
+			c,
+			processName,
+			e.HostThreadID,
+			e.ThreadStartTime,
+		)
+	case Container:
+		format = fmt.Sprintf(
+			pcapContDir+"%v.pcap",
+			c,
+		)
+	case Command:
+		format = fmt.Sprintf(
+			pcapCommDir+"%v/%v.pcap",
+			c,
+			processName,
+		)
+	}
+
+	return format
+}
+
+// mkdirForPcapType creates the dir that will hold the pcap file(s)
+func mkdirForPcapType(o *os.Root, c string, t PcapType) error {
+	var dirToCreate string
+
+	switch t {
+	case Single:
+		dirToCreate = pcapSingleDir
+	case Process:
+		dirToCreate = pcapProcDir + c + "/"
+	case Container:
+		dirToCreate = pcapContDir
+	case Command:
+		dirToCreate = pcapCommDir + c + "/"
+	case None:
+		// no dir to create, no pcap files
+		return nil
+	default:
+		return fmt.Errorf("invalid pcap type: %d", t)
+	}
+
+	err := fileutil.MkdirAllAtExist(o, dirToCreate, os.ModePerm)
+	if err != nil {
+		return errfmt.WrapError(err)
+	}
+
+	return nil
+}
+
+// getPcapFileAndWriter returns a file descriptor and and its associated pcap
+// writer depending on the type "t" given (a Pcap interface implementation).
+func getPcapFileAndWriter(event *trace.Event, t PcapType) (
+	*os.File,
+	*pcapgo.NgWriter,
+	error,
+) {
+	pcapFilePath, err := getPcapFileName(event, t)
+	if err != nil {
+		return nil, nil, errfmt.WrapError(err)
+	}
+
+	file, err := fileutil.OpenAt(
+		outputDirectory,
+		pcapFilePath,
+		os.O_APPEND|os.O_WRONLY|os.O_CREATE,
+		0644,
+	)
+	if err != nil {
+		return nil, nil, errfmt.WrapError(fmt.Errorf("failed to open file %s in output dir: %w", pcapFilePath, err))
+	}
+
+	logger.Debugw("pcap file (re)opened", "filename", pcapFilePath)
+
+	iface, err := GenerateInterface(event, t)
+	if err != nil {
+		return nil, nil, errfmt.WrapError(err)
+	}
+
+	writer, err := pcapgo.NewNgWriterInterface(
+		file,
+		iface,
+		pcapgo.DefaultNgWriterOptions,
+	)
+	if err != nil {
+		return nil, nil, errfmt.WrapError(err)
+	}
+	err = writer.Flush()
+	if err != nil {
+		return nil, nil, errfmt.WrapError(err)
+	}
+
+	return file, writer, nil
+}
+
+// configToPcapType converts a simple bool like config struct to internal config
+func configToPcapType(simple config.PcapsConfig) PcapType {
+	var cfg PcapType
+
+	if simple.CaptureSingle {
+		cfg |= Single
+	}
+	if simple.CaptureProcess {
+		cfg |= Process
+	}
+	if simple.CaptureContainer {
+		cfg |= Container
+	}
+	if simple.CaptureCommand {
+		cfg |= Command
+	}
+
+	return cfg
+}
+
+// PcapsEnabled checks if the simple config has any bool value set
+func PcapsEnabled(simple config.PcapsConfig) bool {
+	cfg := configToPcapType(simple)
+	return cfg != None
+}
+
+func GetPcapOptions(c config.PcapsConfig) PcapOption {
+	var options PcapOption
+
+	if c.CaptureFiltered {
+		options |= Filtered
+	}
+
+	return options
+}

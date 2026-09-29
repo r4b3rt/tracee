@@ -1,0 +1,222 @@
+# On demand: package and upload the Helm chart
+#
+# This is a manually triggered workflow to package and upload the Helm chart
+# from the specified Git revision (e.g., main branch or v0.7.0 tag) to Helm
+# repository on https://github.com/aquasecurity/helm-charts.
+#
+# Set dry-run to validate the chart, app auth, and local packaging without
+# creating GitHub Releases or pushing index.yaml to gh-pages.
+#
+name: Publish Helm
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch, tag or SHA to publish, e.g. v0.0.1
+        required: true
+      dry-run:
+        description: Validate chart and auth WITHOUT publishing to helm-charts (dry run)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: publish-helm-helm-charts
+  cancel-in-progress: false
+
+env:
+  HELM_REP: helm-charts
+  GH_OWNER: aquasecurity
+  CHART_DIR: deploy/helm/tracee
+
+jobs:
+  publish:
+    name: ${{ inputs.dry-run && 'Publish Helm (dry run)' || 'Publish Helm' }}
+    permissions:
+      contents: read
+    runs-on:
+      # Ubuntu 24.04 generic (6.11.0-29) [x86_64]
+      - graas_ami-03dbff05cae3a30d0_${{ github.event.number || 0 }}${{ github.run_attempt }}-${{ github.run_id }}
+      - EXECUTION_TYPE=SHORT
+      - INSTANCE_TYPE=MEDIUM
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.HELM_CHARTS_GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_CHARTS_GH_APP_PRIVATE_KEY }}
+          owner: ${{ env.GH_OWNER }}
+          repositories: ${{ env.HELM_REP }}
+
+      - name: Resolve bot identity
+        id: bot
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          login="${APP_SLUG}[bot]"
+          bot_id="$(gh api "/users/${login}" --jq .id)"
+          echo "name=${login}" >> "${GITHUB_OUTPUT}"
+          echo "email=${bot_id}+${login}@users.noreply.github.com" >> "${GITHUB_OUTPUT}"
+
+      - name: Test Helm chart
+        uses: ./.github/actions/test-helm-chart
+
+      - name: Install chart-releaser
+        run: |
+          wget https://github.com/helm/chart-releaser/releases/download/v1.3.0/chart-releaser_1.3.0_linux_amd64.tar.gz
+          echo "baed2315a9bb799efb71d512c5198a2a3b8dcd139d7f22f878777cffcd649a37  chart-releaser_1.3.0_linux_amd64.tar.gz" | sha256sum -c -
+          tar xzvf chart-releaser_1.3.0_linux_amd64.tar.gz cr
+
+      - name: Package helm chart
+        run: |
+          ./cr package --package-path .cr-release-packages "${CHART_DIR}"
+
+      - name: Upload helm chart
+        # Failed with upload the same version: https://github.com/helm/chart-releaser/issues/101
+        if: inputs.dry-run != true
+        continue-on-error: true
+        env:
+          CR_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          ./cr upload --owner "${GH_OWNER}" \
+            --git-repo "${HELM_REP}" \
+            --package-path .cr-release-packages \
+            --token "${CR_TOKEN}"
+
+      - name: Index helm chart
+        run: |
+          ./cr index --owner "${GH_OWNER}" \
+            --git-repo "${HELM_REP}" \
+            --charts-repo "https://${GH_OWNER}.github.io/${HELM_REP}/" \
+            --index-path index.yaml
+
+      - name: Verify helm-charts access
+        if: inputs.dry-run == true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          repo_full_name="$(gh api "repos/${GH_OWNER}/${HELM_REP}" --jq .full_name)"
+          if [ "${repo_full_name}" != "${GH_OWNER}/${HELM_REP}" ]; then
+              echo "Unexpected repository: ${repo_full_name}" >&2
+              exit 1
+          fi
+          gh api "repos/${GH_OWNER}/${HELM_REP}/releases?per_page=1" >/dev/null
+          echo "GitHub App token can access ${GH_OWNER}/${HELM_REP}"
+
+      - name: Helm install dry-run
+        if: inputs.dry-run == true
+        run: |
+          set -euo pipefail
+          package_file="$(ls -1 .cr-release-packages/*.tgz | head -1)"
+          helm install --dry-run tracee "${package_file}" -n tracee --create-namespace
+
+      - name: Dry-run summary
+        if: inputs.dry-run == true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REF: ${{ github.event.inputs.ref }}
+          BOT_NAME: ${{ steps.bot.outputs.name }}
+          BOT_EMAIL: ${{ steps.bot.outputs.email }}
+
+        run: |
+          set -euo pipefail
+          chart_name="$(grep '^name:' "${CHART_DIR}/Chart.yaml" | awk '{print $2}' | tr -d '"')"
+          chart_version="$(grep '^version:' "${CHART_DIR}/Chart.yaml" | awk '{print $2}' | tr -d '"')"
+          release_tag="${chart_name}-${chart_version}"
+          if gh api "repos/${GH_OWNER}/${HELM_REP}/releases/tags/${release_tag}" >/dev/null 2>&1; then
+              release_status="exists (upload would be skipped or fail)"
+          else
+              release_status="not found (would create new release)"
+          fi
+          package_files="$(ls -1 .cr-release-packages/*.tgz)"
+          {
+              echo "## Publish Helm dry run"
+              echo ""
+              echo "**Result:** Validation passed; publish steps skipped"
+              echo ""
+              echo "| Field | Value |"
+              echo "| --- | --- |"
+              echo "| Ref | \`${REF}\` |"
+              echo "| Chart | \`${chart_name}\` |"
+              echo "| Version | \`${chart_version}\` |"
+              echo "| Release tag | \`${release_tag}\` |"
+              echo "| Release status | ${release_status} |"
+              echo "| Bot author | \`${BOT_NAME}\` |"
+              echo "| Bot email | \`${BOT_EMAIL}\` |"
+              echo "| Repository | \`${GH_OWNER}/${HELM_REP}\` |"
+              echo ""
+              echo "### Package files"
+              echo "\`\`\`"
+              echo "${package_files}"
+              echo "\`\`\`"
+              echo ""
+              echo "### Skipped steps"
+              echo "- \`cr upload\` (GitHub Release)"
+              echo "- Push \`index.yaml\` to \`gh-pages\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Dry run complete for ${chart_name} ${chart_version}"
+
+      - name: Upload dry-run artifacts
+        if: inputs.dry-run == true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: helm-publish-dry-run
+          path: |
+            .cr-release-packages/
+            index.yaml
+
+      - name: Push index file
+        if: inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_NAME: ${{ steps.bot.outputs.name }}
+          BOT_EMAIL: ${{ steps.bot.outputs.email }}
+        run: |
+          set -euo pipefail
+          git config --global user.email "${BOT_EMAIL}"
+          git config --global user.name "${BOT_NAME}"
+          max_attempts=3
+          attempt=1
+          while [ "${attempt}" -le "${max_attempts}" ]; do
+              if [ "${attempt}" -gt 1 ]; then
+                  ./cr index --owner "${GH_OWNER}" \
+                      --git-repo "${HELM_REP}" \
+                      --charts-repo "https://${GH_OWNER}.github.io/${HELM_REP}/" \
+                      --index-path index.yaml
+              fi
+              clone_dir="$(mktemp -d)"
+              git clone --single-branch --branch gh-pages \
+                  "https://x-access-token:${GH_TOKEN}@github.com/${GH_OWNER}/${HELM_REP}.git" \
+                  "${clone_dir}"
+              cp index.yaml "${clone_dir}/index.yaml"
+              cd "${clone_dir}"
+              git add index.yaml
+              if git diff --cached --quiet; then
+                  echo "No index changes to push"
+                  rm -rf "${clone_dir}"
+                  exit 0
+              fi
+              git commit -m "Update index.yaml from https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+              if git push origin "HEAD:gh-pages"; then
+                  rm -rf "${clone_dir}"
+                  exit 0
+              fi
+              push_status=$?
+              rm -rf "${clone_dir}"
+              cd "${GITHUB_WORKSPACE}"
+              if [ "${attempt}" -eq "${max_attempts}" ]; then
+                  exit "${push_status}"
+              fi
+              echo "Push rejected (attempt ${attempt}/${max_attempts}), re-indexing and retrying..."
+              attempt=$((attempt + 1))
+          done

@@ -1,0 +1,693 @@
+#
+# When a PR is opened or updated: Run Tracee Tests
+#
+name: PR
+
+on:
+  workflow_call:
+    inputs:
+      tracee_ref:
+        description: "Tracee ref to checkout"
+        required: false
+        default: "main"
+        type: string
+      upstream_libbpfgo:
+        description: "Use upstream libbpfgo (main branch) instead of pinned version"
+        required: false
+        default: false
+        type: boolean
+
+  workflow_dispatch:
+    inputs:
+      tracee_ref:
+        description: "Tracee ref to checkout"
+        required: true
+        default: "main"
+        type: string
+      upstream_libbpfgo:
+        description: "Use upstream libbpfgo (main branch) instead of pinned version"
+        required: false
+        default: false
+        type: boolean
+
+  pull_request:
+    branches:
+      - "main"
+      - "release-v*.*"
+    paths:
+      - "!docs/**"
+      - "!deploy/**"
+      - "!packaging/**"
+      - "!**.yaml"
+      - "!**.md"
+      - "!**.txt"
+      - "!**.conf"
+      # override previous rules:
+      - "docs/docs/flags/**"
+      - "docs/man/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "**.c"
+      - "**.h"
+      - "**.go"
+      - "**.sh"
+      - "**/pr.yaml"
+      - "**/action.yaml"
+      - "!.cursor/**"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TRACEE_REF: ${{ inputs.tracee_ref || github.event.inputs.tracee_ref || github.ref }}
+  # Go 1.26 randomizes the heap base address, breaking the eBPF stack_pivot
+  # detector's Go heap recognition (see plans/tracee/stack-pivot-go126-issue.md).
+  GOEXPERIMENT: norandomizedheapbase64
+  TESTS: >
+    TRC-102
+    TRC-103
+    TRC-104
+    TRC-105
+    TRC-107
+    TRC-1010
+    TRC-1014
+    TRC-1016
+    TRC-1018
+    TRC-1022
+  ARM64_TESTS: >
+    TRC-102
+    TRC-103
+    TRC-104
+    TRC-105
+    TRC-107
+    TRC-1010
+    TRC-1014
+    TRC-1016
+    TRC-1018
+  NETTESTS: >
+    IPv4
+    IPv6
+    TCP
+    UDP
+    ICMP
+    ICMPv6
+    DNS
+    HTTP
+    HTTPRequest
+    HTTPResponse
+
+jobs:
+
+  debug-runner-label:
+    name: Debug Runner Label
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    steps:
+      - name: Debug Runner Label
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          RUNNER_LABEL: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+        run: |
+          echo "Repository owner: ${REPO_OWNER}"
+          echo "Runner label: ${RUNNER_LABEL}"
+
+  #
+  # DOC VERIFICATION
+  #
+
+  verify-docs:
+    name: Verify Documentation
+    if: inputs.upstream_libbpfgo != true
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TRACEE_REF }}
+
+      - name: Ensure updates of *.1.md and *.1 pairs
+        run: |
+          ./scripts/verify_man_md_sync.sh --base-ref origin/main --fetch-depth 1
+
+  #
+  # CODE VERIFICATION
+  #
+
+  verify-analyze-code:
+    name: Verify and Analyze Code
+    if: inputs.upstream_libbpfgo != true
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    container:
+      image: alpine/git:2.49.1@sha256:bd54f921f6d803dfa3a4fe14b7defe36df1b71349a3e416547e333aa960f86e3
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+
+      - name: Setup Tracee
+        uses: ./.github/actions/setup-tracee-alpine
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-
+
+      - name: Lint
+        run: |
+          if test -z "$(gofmt -l .)"; then
+              echo "Congrats! There is nothing to fix."
+          else
+              echo "The following lines should be fixed."
+              gofmt -s -d .
+              exit 1
+          fi
+
+      - name: Lint (Revive)
+        run: |
+          make check-lint
+
+      - name: Check Code Style
+        run: |
+          make check-fmt
+
+      - name: Check Golang Vet
+        run: |
+          make check-vet
+
+      - name: Check with StaticCheck
+        run: |
+          make check-staticcheck
+
+      - name: Check with errcheck
+        run: |
+          make check-err
+
+      # govulncheck is advisory-only here: on findings the step exits non-zero (so it shows as
+      # failed and its report stays visible), while `continue-on-error` keeps that failure from
+      # blocking the jobs that need verify-analyze-code - unit/integration/etc. still run. The
+      # report is surfaced as a non-blocking hint in the job summary. Resolve by bumping the flagged
+      # dependency once a fixed release is available.
+      - name: Check with govulncheck (advisory, non-blocking)
+        continue-on-error: true
+        run: |
+          set +e
+          log=/tmp/govulncheck.log
+          make check-vulncheck > "${log}" 2>&1
+          rc=$?
+          cat "${log}"
+          if [ "${rc}" -ne 0 ]; then
+              echo "::warning title=govulncheck (advisory, non-blocking)::Findings reported; PR checks still run. Bump the flagged dependency once a fixed release exists."
+              {
+                  echo "### govulncheck: advisory hint (non-blocking)"
+                  echo ""
+                  echo "govulncheck reported findings. This does NOT block the unit, integration, or"
+                  echo "other jobs. Resolve by bumping the flagged dependency once a fixed release exists."
+                  echo ""
+                  echo '```'
+                  tail -n 60 "${log}"
+                  echo '```'
+              } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          exit "${rc}"
+
+  #
+  # TOOLS BUILD VERIFICATION
+  #
+
+  verify-tools:
+    name: Verify Other Tools
+    if: inputs.upstream_libbpfgo != true
+    needs:
+      - verify-analyze-code
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    container:
+      image: alpine/git:2.49.1@sha256:bd54f921f6d803dfa3a4fe14b7defe36df1b71349a3e416547e333aa960f86e3
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+
+      - name: Setup Tracee
+        uses: ./.github/actions/setup-tracee-alpine
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-
+
+      - name: Build Tracee Benchmark Tool
+        run: |
+          make clean
+          make tracee-bench
+
+  #
+  # CODE TESTS
+  #
+
+  unit-tests:
+    name: Unit Tests (x86_64)
+    if: ${{ !cancelled() && !failure() }}
+    needs:
+      - verify-analyze-code
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    container:
+      image: alpine/git:2.49.1@sha256:bd54f921f6d803dfa3a4fe14b7defe36df1b71349a3e416547e333aa960f86e3
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+          fetch-depth: 0
+
+      - name: Setup Tracee
+        uses: ./.github/actions/setup-tracee-alpine
+
+      - name: Swap to upstream libbpfgo
+        if: inputs.upstream_libbpfgo == true
+        uses: ./.github/actions/swap-upstream-libbpfgo
+
+      - name: Cache Go modules
+        if: inputs.upstream_libbpfgo != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-
+
+      - name: Run Unit Tests
+        uses: ./.github/actions/run-unit-tests
+
+  unit-tests-arm64:
+    name: Unit Tests (ARM64)
+    if: ${{ !cancelled() && !failure() }}
+    needs:
+      - verify-analyze-code
+    runs-on: ${{ vars.UBUNTU_ARM64_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04-arm') }}
+    permissions:
+      contents: read
+    container:
+      image: alpine/git:2.49.1@sha256:bd54f921f6d803dfa3a4fe14b7defe36df1b71349a3e416547e333aa960f86e3
+      volumes:
+        - /opt:/opt:rw,rshared
+          # The following volume mounts are a workaround for GitHub Actions runner limitations.
+        # Some GitHub-hosted runners expect Node.js to be available at /__e/node20 or /__e/node24, which is not present in the base container.
+        # This mapping provides Node.js from the host's /opt directory to the expected location in the container.
+        # WARNING: This creates a fragile dependency on the runner's internal filesystem layout.
+        # If the runner environment changes, this workflow may break. Consider updating this step if a more robust solution becomes available.
+        - /opt:/__e/node20:ro,rshared
+        - /opt:/__e/node24:ro,rshared
+    steps:
+      - name: Allow Linux musl containers on ARM64 runners
+        run: |
+          sed -i "/^ID=/s/alpine/NotpineForGHA/" /etc/os-release
+          apk add nodejs --update-cache
+          mkdir -p /opt/bin
+          ln -s /usr/bin/node /opt/bin/node
+        shell: sh
+
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+          fetch-depth: 0
+
+      - name: Setup Tracee
+        uses: ./.github/actions/setup-tracee-alpine
+
+      - name: Swap to upstream libbpfgo
+        if: inputs.upstream_libbpfgo == true
+        uses: ./.github/actions/swap-upstream-libbpfgo
+
+      - name: Cache Go modules
+        if: inputs.upstream_libbpfgo != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-
+
+      - name: Run Unit Tests
+        uses: ./.github/actions/run-unit-tests
+
+  #
+  # INTEGRATION TESTS
+  #
+
+  integration-tests:
+    name: Integration Tests (x86_64)
+    if: ${{ !cancelled() && !failure() }}
+    needs:
+      - verify-analyze-code
+    runs-on:
+      # Ubuntu 24.04 generic (6.11.0-29) [x86_64]
+      - graas_ami-03dbff05cae3a30d0_${{ github.event.number || 0 }}${{ github.run_attempt }}-${{ github.run_id }}
+      - EXECUTION_TYPE=SHORT
+      - INSTANCE_TYPE=MEDIUM
+    permissions:
+      contents: read
+    env:
+      HOME: "/tmp/root"
+      GOPATH: "/tmp/go"
+      GOCACHE: "/tmp/go-cache"
+      GOROOT: "/usr/local/go"
+    # NOTE: Container execution disabled - running directly on host AMI which has all required tooling pre-installed.
+    # Re-enable container if host execution causes issues or for environment isolation.
+    # container:
+    #   image: ubuntu:24.04@sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc
+    #   options: --pid=host --cgroupns=host --privileged -v /etc/os-release:/etc/os-release-host:ro -v /var/run:/var/run:ro -v /sys/kernel/debug:/sys/kernel/debug:rw -v /boot:/boot:ro
+    steps:
+      - name: Prepare Environment
+        run: |
+          mkdir -p "${HOME}" "${GOPATH}" "${GOCACHE}"
+
+      # NOTE: Git installation not needed when running on host - AMI already has git installed.
+      # - name: Install Git
+      #   run: |
+      #     export DEBIAN_FRONTEND=noninteractive
+      #     apt-get update
+      #     apt-get install -y --no-install-recommends git-core ca-certificates
+      #     update-ca-certificates
+
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+          fetch-depth: 0
+
+      # NOTE: Git ownership fix not needed when running on host (only required in containers).
+      # - name: Fix Git ownership
+      #   run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      # NOTE: Setup Tracee not needed - AMI has tooling pre-installed. Re-enable when tooling version
+      # bump is required. If re-enabled, update action to auto-detect distro (Ubuntu/CentOS/Alpine/etc).
+      # - name: Setup Tracee
+      #   uses: ./.github/actions/setup-tracee-ubuntu
+
+      - name: Swap to upstream libbpfgo
+        if: inputs.upstream_libbpfgo == true
+        uses: ./.github/actions/swap-upstream-libbpfgo
+
+      - name: Cache Go modules
+        if: inputs.upstream_libbpfgo != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.GOPATH }}/pkg/mod
+            ${{ env.GOCACHE }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-graas-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-graas-${{ hashFiles('**/go.mod') }}-
+
+      - name: Pull test images
+        uses: ./.github/actions/pull-test-images
+
+      # On-the-fly install: the pre-baked AMI does not yet ship Zig, which builds the
+      # syscaller integration-test helper. Remove once Zig is baked into the AMI
+      # (scripts/installation/prepare-ami.sh). Pinned + checksum-verified.
+      - name: Install Zig
+        run: sudo ./scripts/installation/install-zig.sh
+
+      - name: Run Integration Tests
+        uses: ./.github/actions/run-integration-tests
+
+  integration-tests-arm64:
+    name: Integration Tests (ARM64)
+    if: ${{ !cancelled() && !failure() }}
+    needs:
+      - verify-analyze-code
+    runs-on:
+      # Ubuntu 24.04 generic (6.11.0-29) [aarch64]
+      - graas_ami-07774797557132122_${{ github.event.number || 0 }}${{ github.run_attempt }}-${{ github.run_id }}
+      - EXECUTION_TYPE=SHORT
+      - INSTANCE_TYPE=MEDIUM
+    permissions:
+      contents: read
+    env:
+      HOME: "/tmp/root"
+      GOPATH: "/tmp/go"
+      GOCACHE: "/tmp/go-cache"
+      GOROOT: "/usr/local/go"
+    # NOTE: Container execution disabled - running directly on host AMI which has all required tooling pre-installed.
+    # Re-enable container if host execution causes issues or for environment isolation.
+    # container:
+    #   image: ubuntu:24.04@sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc
+    #   options: --pid=host --cgroupns=host --privileged -v /etc/os-release:/etc/os-release-host:ro -v /var/run:/var/run:ro -v /sys/kernel/debug:/sys/kernel/debug:rw -v /boot:/boot:ro
+    steps:
+      - name: Prepare Environment
+        run: |
+          mkdir -p "${HOME}" "${GOPATH}" "${GOCACHE}"
+
+      # NOTE: Git installation not needed when running on host - AMI already has git installed.
+      # - name: Install Git
+      #   run: |
+      #     export DEBIAN_FRONTEND=noninteractive
+      #     apt-get update
+      #     apt-get install -y --no-install-recommends git-core ca-certificates
+      #     update-ca-certificates
+
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+          fetch-depth: 0
+
+      # NOTE: Git ownership fix not needed when running on host (only required in containers).
+      # - name: Fix Git ownership
+      #   run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      # NOTE: Setup Tracee not needed - AMI has tooling pre-installed. Re-enable when tooling version
+      # bump is required. If re-enabled, update action to auto-detect distro (Ubuntu/CentOS/Alpine/etc).
+      # - name: Setup Tracee
+      #   uses: ./.github/actions/setup-tracee-ubuntu
+
+      - name: Swap to upstream libbpfgo
+        if: inputs.upstream_libbpfgo == true
+        uses: ./.github/actions/swap-upstream-libbpfgo
+
+      - name: Cache Go modules
+        if: inputs.upstream_libbpfgo != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.GOPATH }}/pkg/mod
+            ${{ env.GOCACHE }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-graas-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-graas-${{ hashFiles('**/go.mod') }}-
+
+      - name: Pull test images
+        uses: ./.github/actions/pull-test-images
+
+      # On-the-fly install: the pre-baked AMI does not yet ship Zig, which builds the
+      # syscaller integration-test helper. Remove once Zig is baked into the AMI
+      # (scripts/installation/prepare-ami.sh). Pinned + checksum-verified.
+      - name: Install Zig
+        run: sudo ./scripts/installation/install-zig.sh
+
+      - name: Run Integration Tests
+        uses: ./.github/actions/run-integration-tests
+
+  #
+  # PERFORMANCE TESTS
+  #
+
+  performance-tests:
+    name: Performance Tests
+    if: ${{ !cancelled() && !failure() }}
+    needs:
+      - verify-analyze-code
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    container:
+      image: alpine/git:2.49.1@sha256:bd54f921f6d803dfa3a4fe14b7defe36df1b71349a3e416547e333aa960f86e3
+      options: --pid=host --cgroupns=host --privileged -v /etc/os-release:/etc/os-release-host:ro -v /var/run:/var/run:ro
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+
+      - name: Setup Tracee
+        uses: ./.github/actions/setup-tracee-alpine
+
+      - name: Swap to upstream libbpfgo
+        if: inputs.upstream_libbpfgo == true
+        uses: ./.github/actions/swap-upstream-libbpfgo
+
+      - name: Cache Go modules
+        if: inputs.upstream_libbpfgo != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-alpine-${{ hashFiles('**/go.mod') }}-
+
+      - name: Run Performance Tests
+        run: |
+          make test-performance
+
+  #
+  # FUNCTIONAL TESTS AGAINST DIFFERENT KERNELS
+  #
+
+  generate-matrix:
+    name: Generate Test Matrix
+    runs-on: ${{ vars.UBUNTU_X86_RUNNER_LABEL || (github.repository_owner == 'aquasecurity' && 'ubuntu-24.04') }}
+    permissions:
+      contents: read
+    outputs:
+      matrix01: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TRACEE_REF }}
+
+      - name: Generate Matrix
+        id: generate
+        uses: ./.github/actions/generate-kernel-matrix
+
+  kernel-tests:
+    name: ${{ matrix.job_name }}
+    needs:
+      - generate-matrix
+    runs-on:
+      - graas_ami-${{ matrix.ami }}_${{ github.event.number || 0 }}${{ github.run_attempt }}-${{ github.run_id }}_${{ matrix.sufix }}
+      - EXECUTION_TYPE=LONG
+      - INSTANCE_TYPE=XLARGE
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{fromJson(needs.generate-matrix.outputs.matrix01)}}
+    env:
+      HOME: "/tmp/root"
+      GOPATH: "/tmp/go"
+      GOCACHE: "/tmp/go-cache"
+      GOROOT: "/usr/local/go"
+    steps:
+      - name: Prepare Environment
+        run: |
+          mkdir -p "${HOME}" "${GOPATH}" "${GOCACHE}"
+
+      - name: "Checkout"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          ref: ${{ env.TRACEE_REF }}
+
+      - name: Swap to upstream libbpfgo
+        if: inputs.upstream_libbpfgo == true
+        uses: ./.github/actions/swap-upstream-libbpfgo
+
+      - name: Cache Go modules
+        if: inputs.upstream_libbpfgo != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.GOPATH }}/pkg/mod
+            ${{ env.GOCACHE }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-graas-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-go-graas-${{ hashFiles('**/go.mod') }}-
+
+      - name: "System Info"
+        run: ./scripts/system-info.sh --all
+
+      - name: "Environment Variables"
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+          ARM64_TESTS_VALUE: ${{ env.ARM64_TESTS }}
+        run: |
+          if [ "${MATRIX_ARCH}" = "aarch64" ]; then
+              echo "TESTS=${ARM64_TESTS_VALUE}" >> "${GITHUB_ENV}"
+          fi
+          LINUX_ID=$(grep -Pom1 '^ID=\K.*' /etc/os-release)
+          echo "LINUX_ID=${LINUX_ID}" >> "${GITHUB_ENV}"
+          VERSION_CODENAME=$(grep -Pom1 '^VERSION_CODENAME=\K.*' /etc/os-release 2> /dev/null || echo "")
+          echo "VERSION_CODENAME=${VERSION_CODENAME}" >> "${GITHUB_ENV}"
+        shell: bash
+
+      - name: "Disable Unattended Upgrades (Ubuntu only)"
+        if: ${{ env.LINUX_ID == 'ubuntu' }}
+        run: ./scripts/disable-unattended-upgrades.sh --timeout 5
+        continue-on-error: true
+
+      # NOTE: To remove when AMIs are updated accordingly.
+      - name: "Fix EOL Ubuntu Repositories (Lunar/Mantic)"
+        if: ${{ env.LINUX_ID == 'ubuntu' && (env.VERSION_CODENAME == 'lunar' || env.VERSION_CODENAME == 'mantic') }}
+        run: |
+          set -e
+          ARCH=$(uname -m)
+          if [[ "${ARCH}" == "aarch64" ]] || [[ "${ARCH}" == "arm64" ]]; then
+              sed -i 's|http://.*ports\.ubuntu\.com/ubuntu-ports|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+              sed -i 's|http://.*\.ec2\.ports\.ubuntu\.com/ubuntu-ports|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+              sed -i 's|http://.*ec2\.ports\.ubuntu\.com/ubuntu-ports|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+          else
+              sed -i 's|http://.*archive\.ubuntu\.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+              sed -i 's|http://security\.ubuntu\.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+          fi
+        shell: bash
+        continue-on-error: true
+
+      # NOTE: Use this step when AMIs are not updated with the latest tooling.
+      # Comment it after new AMIs are released.
+      - name: "Install Tooling"
+        id: install-tooling
+        run: |
+          ./scripts/installation/install-clang.sh
+
+      # NOTE: Show Tooling Info again to verify on-the-fly changes made during workflow execution.
+      - name: "Tooling Info (After Installations and Configurations)"
+        if: always() && steps.install-tooling.outcome == 'success'
+        run: ./scripts/system-info.sh --tooling
+
+      - name: Pull test images
+        uses: ./.github/actions/pull-test-images
+
+      - name: "Sync System Time"
+        run: ./scripts/sync_system_time.sh
+        continue-on-error: true
+
+      - name: "Run E2E Tests"
+        uses: ./.github/actions/run-e2e-tests
+        with:
+          job-name: ${{ matrix.job_name }}
+          run-id: ${{ github.run_id }}
+          run-attempt: ${{ github.run_attempt }}

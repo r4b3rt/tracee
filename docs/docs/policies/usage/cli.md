@@ -1,0 +1,182 @@
+# CLI Policy Usage
+
+This section details how to use policies with the Tracee CLI.
+
+## Applying Tracee Policies
+
+A [policy file](../index.md) can be applied using the `--policy` flag:
+
+```console
+tracee --policy ./policy.yml
+```
+
+## Using multiple policies
+
+To specify multiple policies, users can either specify the directory, which contains all of the policies that they would like to load into Tracee, or by specifying the policies one by one.
+
+Through a directory:
+
+```console
+tracee --policy ./policy-directory
+```
+
+By specifying individual policies:
+
+```console
+tracee --policy ./policy-one.yaml --policy ./policy-two.yaml 
+```
+
+## Event Selection Shortcuts
+
+Instead of defining policies in YAML files, you can use the `--events` flag for quick event selection:
+
+```console
+# Trace specific events
+tracee --events execve,openat
+
+# Select detectors by threat severity
+tracee --events threat.severity=critical
+
+# Combine regular events with threat-based selection
+tracee --events write --events 'threat.severity>=high'
+```
+
+See the [events flag documentation](../../flags/events.1.md) for complete details on threat-based detector selection.
+
+## EXAMPLE
+
+```console
+tracee --config ./config.yaml --policy ./policy.yaml && cat /tmp/debug.json
+```
+
+### config.yaml (example)
+
+```yaml
+# server configuration
+
+server:
+    http-address: ":3366"
+    healthz: true
+    metrics: false
+    pprof: false
+    pyroscope: false
+
+# feature flags
+
+containers:
+    enrich: true
+    # cgroupfs:
+    #     path: /host/sys/fs/cgroup
+    #     force: true
+    # sockets:
+    #     - runtime: docker
+    #       socket: /var/run/docker.sock
+
+buffers:
+    kernel:
+        artifacts: 1024
+        control-plane: 1024
+    pipeline: 1000
+
+# signatures
+
+signatures-dir: ""
+
+# features setup
+
+capabilities:
+    bypass: false
+stores:
+    process:
+        enabled: true
+        source: both
+        max-processes: 8192
+        max-threads: 8192
+    dns:
+        enabled: false
+
+# logging
+
+logging:
+  level: debug
+  file: /tmp/debug.json
+  # aggregate:
+  #     enabled: true
+  #     flush-interval: 5s
+  filters:
+    exclude:
+      pkg:
+        - capabilities
+
+# enrichment
+
+enrichment:
+  environment: true
+  executable-hash:
+    enabled: true
+    mode: dev-inode
+  decoded-data: true
+
+# output
+
+output:
+  sort-events: true
+  destinations:
+    - name: stdout
+      format: json
+      path: stdout
+```
+
+### policy.yaml
+
+```yaml
+apiVersion: tracee.aquasec.com/v1beta1
+kind: Policy
+metadata:
+  name: signatures
+  annotations:
+    description: traces all signatures
+spec:
+  scope:
+    - global
+  rules:
+    # display security events
+    - event: stdio_over_socket
+    - event: k8s_api_connection
+    - event: aslr_inspection
+    - event: proc_mem_code_injection
+    - event: docker_abuse
+    - event: scheduled_task_mod
+    - event: ld_preload
+    - event: cgroup_notify_on_release
+    - event: default_loader_mod
+    - event: sudoers_modification
+    - event: sched_debug_recon
+    - event: system_request_key_mod
+    - event: cgroup_release_agent
+    - event: rcd_modification
+    - event: core_pattern_modification
+    - event: proc_kcore_read
+    - event: proc_mem_access
+    - event: hidden_file_created
+    - event: anti_debugging
+    - event: ptrace_code_injection
+    - event: process_vm_write_inject
+    - event: disk_mount
+    - event: dynamic_code_loading
+    - event: fileless_execution
+    - event: illegitimate_shell
+    - event: kernel_module_loading
+    - event: k8s_cert_theft
+    - event: proc_fops_hooking
+    - event: syscall_hooking
+    - event: dropped_executable
+    # tracee open by cat in /tmp/* files
+    - event: openat
+      filters:
+        - comm=cat
+        - data.pathname=/tmp*
+    # trace all container creations and removals
+    - event: container_create
+    - event: container_remove
+```

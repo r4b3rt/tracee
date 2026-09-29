@@ -1,0 +1,15 @@
+name: Run Unit Tests
+description: |
+  Run comprehensive unit test suite including main unit tests and script tests.
+runs:
+  using: composite
+  steps:
+    - name: Run Full Unit Test Suite
+      run: |
+        # Run comprehensive test suite for all modules (main + types + common + api)
+        make test-unit
+      shell: sh
+    - name: Run Scripts Unit Tests
+      run: |
+        make run-scripts-test-unit
+      shell: sh
